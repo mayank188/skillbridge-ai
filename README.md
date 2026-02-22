@@ -131,7 +131,7 @@ hackathon/
 - **Input Validation**: Server-side validation on all endpoints
 - **Environment Variables**: Secure credential management
 
-## 📊 Matching Algorithm
+## 📊 Matching Algorithm 
 
 ```
 Score Calculation:
