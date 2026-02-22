@@ -1,4 +1,4 @@
-# SkillBridge AI - Production-Ready Full-Stack Hiring Platform
+# SkillBridge AI by TechMarcos - Production-Ready Full-Stack Hiring Platform
 
 A comprehensive AI-powered hiring platform that matches candidates with opportunities through genuine capability evaluation using skill assessments, dynamic quizzes, and project evaluations.
 
@@ -131,7 +131,7 @@ hackathon/
 - **Input Validation**: Server-side validation on all endpoints
 - **Environment Variables**: Secure credential management
 
-## 📊 Matching Algorithm
+## 📊 Matching Algorithm 
 
 ```
 Score Calculation:
