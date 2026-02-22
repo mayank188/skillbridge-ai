@@ -101,12 +101,12 @@ async function shortlistCandidate(req, res, next) {
       err.statusCode = 404;
       return next(err);
     }
-    await Application.findOneAndUpdate(
+    const app = await Application.findOneAndUpdate(
       { jobId: job._id, candidateId: candidate._id },
       { $set: { status: 'shortlisted' } },
-      { upsert: true, new: true }
+      { upsert: true, new: true, setDefaultsOnInsert: true }
     );
-    res.status(201).json({ shortlisted: true });
+    res.status(201).json({ shortlisted: true, application: app });
   } catch (err) {
     next(err);
   }

@@ -62,6 +62,14 @@ async function getDashboard(req, res, next) {
         evaluation: p.evaluation,
         createdAt: p.createdAt,
       })),
+      // application counts for candidate (pending, shortlisted, accepted, rejected)
+      applicationCounts: {
+        total: await Application.countDocuments({ candidateId: req.user._id }),
+        pending: await Application.countDocuments({ candidateId: req.user._id, status: 'pending' }),
+        shortlisted: await Application.countDocuments({ candidateId: req.user._id, status: 'shortlisted' }),
+        accepted: await Application.countDocuments({ candidateId: req.user._id, status: 'accepted' }),
+        rejected: await Application.countDocuments({ candidateId: req.user._id, status: 'rejected' }),
+      },
     });
   } catch (err) {
     next(err);
@@ -207,7 +215,7 @@ async function applyForJob(req, res, next) {
     const application = await Application.create({
       jobId,
       candidateId: req.user._id,
-      status: 'shortlisted',
+      status: 'pending',
     });
 
     res.status(201).json({
@@ -263,4 +271,31 @@ module.exports = {
   getJobListings,
   applyForJob,
   getSkillGapAnalysis,
+  // debug endpoint: return application counts for current candidate
+  getApplicationCounts: async function (req, res, next) {
+    try {
+      const counts = {
+        total: await Application.countDocuments({ candidateId: req.user._id }),
+        pending: await Application.countDocuments({ candidateId: req.user._id, status: 'pending' }),
+        shortlisted: await Application.countDocuments({ candidateId: req.user._id, status: 'shortlisted' }),
+        accepted: await Application.countDocuments({ candidateId: req.user._id, status: 'accepted' }),
+        rejected: await Application.countDocuments({ candidateId: req.user._id, status: 'rejected' }),
+      };
+      res.json(counts);
+    } catch (err) {
+      next(err);
+    }
+  },
+  // debug: return recent applications for this candidate (helpful to inspect statuses)
+  getRecentApplications: async function (req, res, next) {
+    try {
+      const apps = await Application.find({ candidateId: req.user._id })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .populate('jobId', 'title');
+      res.json(apps);
+    } catch (err) {
+      next(err);
+    }
+  },
 };

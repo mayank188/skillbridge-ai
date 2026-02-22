@@ -13,7 +13,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { Trophy, Zap, Target, FileText, TrendingUp, Upload } from 'lucide-react';
+import { Trophy, Zap, Target, FileText, TrendingUp, Upload, CheckCircle } from 'lucide-react';
 import api from '../lib/axios';
 import { DashboardLayout } from '../components/DashboardLayout';
 
@@ -144,6 +144,12 @@ export default function CandidateDashboard() {
               label: 'Skills Added',
               value: dashboard?.skillCount || 0,
               color: 'from-green-500 to-emerald-500',
+            },
+            {
+              icon: CheckCircle,
+              label: 'Shortlisted',
+              value: dashboard?.applicationCounts?.shortlisted || 0,
+              color: 'from-blue-600 to-blue-400',
             },
           ].map((metric, idx) => (
             <motion.div key={idx} whileHover={{ scale: 1.05 }} className={`bg-gradient-to-br ${metric.color} rounded-lg p-6 text-white`}>

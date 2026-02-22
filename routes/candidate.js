@@ -7,6 +7,8 @@ const {
   getJobListings,
   applyForJob,
   getSkillGapAnalysis,
+  getApplicationCounts,
+  getRecentApplications,
 } = require('../controllers/candidateController');
 
 const router = express.Router();
@@ -17,6 +19,10 @@ router.use(requireRole('candidate'));
 
 // Dashboard
 router.get('/dashboard', getDashboard);
+
+// Debug: application counts
+router.get('/applications/counts', getApplicationCounts);
+router.get('/applications/recent', getRecentApplications);
 
 // Resume and skills
 router.post('/resume/upload-and-extract', upload.single('resume'), extractResumeSkills);
