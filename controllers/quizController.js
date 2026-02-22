@@ -2,13 +2,10 @@ const User = require('../models/User');
 const TestResult = require('../models/TestResult');
 const aiService = require('../services/aiService');
 
-/**
- * Generate quiz questions based on candidate skills
- */
+// Generate quiz questions based on provided skills (or candidate skills)
 async function generateQuiz(req, res, next) {
   try {
-    const { numQuestions = 10, difficulty = 'intermediate', skills: requestSkills = [] } = req.body;
-    console.log('generateQuiz requestSkills:', Array.isArray(requestSkills) ? requestSkills : typeof requestSkills);
+    const { numQuestions = 10, difficulty = 'intermediate', skills: requestSkills = [], resumeText } = req.body;
 
     const candidate = await User.findById(req.user._id);
     if (!candidate) {
@@ -17,26 +14,13 @@ async function generateQuiz(req, res, next) {
       return next(err);
     }
 
-    // Use skills from request if provided (from resume extraction), otherwise from database
+    // Determine skills to use: prefer requestSkills, fallback to candidate.skills
     let skillsToUse = [];
-    
-    if (requestSkills && requestSkills.length > 0) {
-      // Normalize skills: accept either strings or objects
-      skillsToUse = requestSkills.map((skill) => {
-        if (typeof skill === 'string') return { name: skill, confidence: 0.8 };
-        if (skill && typeof skill === 'object' && skill.name) return { name: skill.name, confidence: skill.confidence ?? 0.8 };
-        return { name: String(skill), confidence: 0.8 };
-      });
-    } else if (candidate.skills && candidate.skills.length > 0) {
-      skillsToUse = candidate.skills.sort((a, b) => (b.confidence || 0) - (a.confidence || 0)).slice(0, 5);
+    if (Array.isArray(requestSkills) && requestSkills.length > 0) {
+      skillsToUse = requestSkills.map((s) => (typeof s === 'string' ? { name: s } : s));
+    } else if (Array.isArray(candidate.skills) && candidate.skills.length > 0) {
+      skillsToUse = candidate.skills.slice(0, 6);
     } else {
-      const err = new Error('Please upload resume and extract skills first.');
-      err.statusCode = 400;
-      return next(err);
-    }
-
-    // Validate skillsToUse
-    if (!Array.isArray(skillsToUse) || skillsToUse.length === 0) {
       const err = new Error('No skills available to generate quiz. Please upload resume and extract skills.');
       err.statusCode = 400;
       return next(err);
@@ -44,38 +28,31 @@ async function generateQuiz(req, res, next) {
 
     let questions;
     try {
-      questions = await aiService.generateQuizQuestions(skillsToUse, difficulty, parseInt(numQuestions));
+      questions = await aiService.generateQuizQuestions(skillsToUse, difficulty, parseInt(numQuestions, 10), resumeText);
     } catch (e) {
-      console.error('Quiz generation error:', e.message || e);
-      // Fallback: generate simple local MCQs so quizzes are available even when AI fails
+      console.error('AI quiz generation failed, using local fallback:', e && e.message ? e.message : e);
+      // simple local fallback (guarantees options and correctAnswer)
       const localGen = (skillObjs, n) => {
-        const names = skillObjs.map((s) => (typeof s === 'string' ? s : s.name || String(s)));
+        const pool = skillObjs.map((s) => (typeof s === 'string' ? s : s.name || String(s))).slice(0, 10);
         const qs = [];
-        let i = 0;
-        while (qs.length < n) {
-          const skill = names[i % names.length];
-          qs.push({
-            question: `What is ${skill} primarily used for?`,
-            options: [`Web development with ${skill}`, `Database management`, `System programming`, `Mobile apps`],
-            correctAnswer: `Web development with ${skill}`,
-            skill,
-          });
-          i += 1;
+        for (let i = 0; i < n; i++) {
+          const skill = (pool[i % pool.length] || `skill${i}`).toLowerCase();
+          const options = [
+            `Primary use of ${skill}`,
+            `Secondary use of ${skill}`,
+            `Not related to ${skill}`,
+            `General computing`,
+          ];
+          qs.push({ question: `What is ${skill} primarily used for?`, options, correctAnswer: options[0], skill });
         }
-        return qs.slice(0, n);
+        return qs;
       };
-
-      questions = localGen(skillsToUse, parseInt(numQuestions));
+      questions = localGen(skillsToUse, parseInt(numQuestions, 10));
     }
 
+    // Return questions but do not expose anything sensitive
     res.json({
-      questions: questions.map((q, idx) => ({
-        id: idx,
-        question: q.question,
-        options: q.options,
-        skill: q.skill,
-        difficulty,
-      })),
+      questions: questions.map((q, idx) => ({ id: idx, question: q.question, options: q.options, correctAnswer: q.correctAnswer, skill: q.skill, difficulty })),
       count: questions.length,
       difficulty,
     });
@@ -84,83 +61,93 @@ async function generateQuiz(req, res, next) {
   }
 }
 
-/**
- * Submit quiz answers and get results
- */
+// Submit quiz answers and grade. Accepts answers as either option indices (numbers) or answer strings.
 async function submitQuiz(req, res, next) {
   try {
-    const { questions, answers, duration, difficulty = 'intermediate' } = req.body;
+    console.log('[submitQuiz] Raw req.body keys:', Object.keys(req.body));
+    
+    const { questions, answers, duration = 0, difficulty = 'intermediate' } = req.body;
 
-    if (!Array.isArray(questions) || !Array.isArray(answers) || answers.length === questions.length) {
-      const err = new Error('Invalid quiz submission.');
+    console.log('[submitQuiz] Parsed values:', {
+      questionsType: Array.isArray(questions) ? 'array' : typeof questions,
+      answersType: Array.isArray(answers) ? 'array' : typeof answers,
+      questionsLength: Array.isArray(questions) ? questions.length : null,
+      answersLength: Array.isArray(answers) ? answers.length : null,
+      hasQuestions: !!questions,
+      hasAnswers: !!answers,
+    });
+
+    // Validate structure
+    if (!Array.isArray(questions)) {
+      const err = new Error('Invalid submission: questions must be an array');
+      err.statusCode = 400;
+      err.details = { questionsType: typeof questions, questionsValue: questions ? JSON.stringify(questions).substring(0, 100) : 'undefined' };
+      return next(err);
+    }
+
+    if (!Array.isArray(answers)) {
+      const err = new Error('Invalid submission: answers must be an array');
+      err.statusCode = 400;
+      err.details = { answersType: typeof answers, answersValue: answers ? JSON.stringify(answers).substring(0, 100) : 'undefined' };
+      return next(err);
+    }
+
+    if (questions.length === 0) {
+      const err = new Error('Invalid submission: questions array is empty');
       err.statusCode = 400;
       return next(err);
     }
 
-    // Calculate score
+    if (answers.length !== questions.length) {
+      const err = new Error(`Invalid submission: answers length (${answers.length}) must match questions length (${questions.length})`);
+      err.statusCode = 400;
+      return next(err);
+    }
+
+    const normalize = (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v);
+
     let correctCount = 0;
-    const skillBreakdown = {};
+    const skillMap = {};
     const responses = [];
 
-    questions.forEach((question, idx) => {
-      const isCorrect = question.correctAnswer === answers[idx];
-      if (isCorrect) correctCount++;
+    questions.forEach((q, idx) => {
+      const userAns = answers[idx];
+      let isCorrect = false;
 
-      const skill = question.skill || 'general';
-      if (!skillBreakdown[skill]) {
-        skillBreakdown[skill] = { total: 0, correct: 0 };
+      if (typeof userAns === 'number') {
+        // index provided
+        if (Array.isArray(q.options) && q.options[userAns] !== undefined) {
+          isCorrect = normalize(q.options[userAns]) === normalize(q.correctAnswer);
+        }
+      } else {
+        // string provided
+        isCorrect = normalize(userAns) === normalize(q.correctAnswer) || (Array.isArray(q.options) && q.options.some((opt) => normalize(opt) === normalize(userAns)) && normalize(userAns) === normalize(q.correctAnswer));
       }
-      skillBreakdown[skill].total++;
-      if (isCorrect) skillBreakdown[skill].correct++;
 
-      responses.push({
-        questionId: idx,
-        question: question.question,
-        skill,
-        difficulty,
-        userAnswer: answers[idx],
-        correctAnswer: question.correctAnswer,
-        isCorrect,
-      });
+      if (isCorrect) correctCount += 1;
+
+      const skill = q.skill || 'general';
+      if (!skillMap[skill]) skillMap[skill] = { total: 0, correct: 0 };
+      skillMap[skill].total += 1;
+      if (isCorrect) skillMap[skill].correct += 1;
+
+      responses.push({ questionId: q.id ?? idx, question: q.question, skill, difficulty, userAnswer: userAns, correctAnswer: q.correctAnswer, isCorrect });
     });
 
     const score = Math.round((correctCount / questions.length) * 100);
 
-    // Convert skill breakdown to array format
-    const skillBreakdownArray = Object.entries(skillBreakdown).map(([skill, data]) => ({
-      skill,
-      total: data.total,
-      correct: data.correct,
-      percentage: Math.round((data.correct / data.total) * 100),
-    }));
+    const skillBreakdown = Object.entries(skillMap).map(([skill, data]) => ({ skill, total: data.total, correct: data.correct, percentage: Math.round((data.correct / data.total) * 100) }));
 
-    // Save test result
-    const testResult = await TestResult.create({
-      candidateId: req.user._id,
-      totalQuestions: questions.length,
-      correctAnswers: correctCount,
-      score,
-      duration: parseInt(duration) || 0,
-      skillBreakdown: skillBreakdownArray,
-      responses,
-      difficulty,
-    });
+    // Persist test result
+    const testResult = await TestResult.create({ candidateId: req.user._id, totalQuestions: questions.length, correctAnswers: correctCount, score, duration: parseInt(duration, 10) || 0, skillBreakdown, responses, difficulty });
 
-    // Update user test score if higher
+    // Update user's best score
     const candidate = await User.findById(req.user._id);
-    if (score > (candidate.testScore || 0)) {
+    if (candidate && (score > (candidate.testScore || 0))) {
       await User.findByIdAndUpdate(req.user._id, { testScore: score });
     }
 
-    res.json({
-      score,
-      correctAnswers: correctCount,
-      totalQuestions: questions.length,
-      duration,
-      skillBreakdown: skillBreakdownArray,
-      testResultId: testResult._id,
-      message: 'Quiz submitted successfully.',
-    });
+    res.json({ score, correctAnswers: correctCount, totalQuestions: questions.length, duration, skillBreakdown, testResultId: testResult._id, message: 'Quiz submitted successfully.' });
   } catch (err) {
     if (err.name === 'ValidationError') {
       const msg = Object.values(err.errors).map((e) => e.message).join(' ');
@@ -172,48 +159,30 @@ async function submitQuiz(req, res, next) {
   }
 }
 
-/**
- * Get test history
- */
+// Get test history for candidate
 async function getTestHistory(req, res, next) {
   try {
-    const tests = await TestResult.find({ candidateId: req.user._id })
-      .select('-responses')
-      .sort({ createdAt: -1 });
-
+    const tests = await TestResult.find({ candidateId: req.user._id }).select('-responses').sort({ createdAt: -1 });
     res.json(tests);
   } catch (err) {
     next(err);
   }
 }
 
-/**
- * Get single test result with details
- */
+// Get specific test result by ID
 async function getTestResult(req, res, next) {
   try {
     const { testId } = req.params;
-
-    const test = await TestResult.findOne({
-      _id: testId,
-      candidateId: req.user._id,
-    });
-
-    if (!test) {
+    const testResult = await TestResult.findOne({ _id: testId, candidateId: req.user._id });
+    if (!testResult) {
       const err = new Error('Test result not found.');
       err.statusCode = 404;
       return next(err);
     }
-
-    res.json(test);
+    res.json(testResult);
   } catch (err) {
     next(err);
   }
 }
 
-module.exports = {
-  generateQuiz,
-  submitQuiz,
-  getTestHistory,
-  getTestResult,
-};
+module.exports = { generateQuiz, submitQuiz, getTestHistory, getTestResult };

@@ -29,6 +29,7 @@ export default function ResumeAndTest() {
   const [resumeResult, setResumeResult] = useState(null);
   const [extractedSkills, setExtractedSkills] = useState([]);
   const [saveMsg, setSaveMsg] = useState('');
+  const [newSkillInput, setNewSkillInput] = useState('');
 
   const [numQuestions, setNumQuestions] = useState(10);
   const [difficulty, setDifficulty] = useState('intermediate');
@@ -73,37 +74,6 @@ export default function ResumeAndTest() {
       setExtractedSkills(skills);
       setQuizError('');
       setStep(2);
-
-      // Auto-start quiz generation using extracted skills; if server generation fails, fall back to client-side generator
-      setQuizLoading(true);
-      try {
-        await handleStartQuiz(skills);
-      } catch (e) {
-        // fallback: generate simple local questions so test always starts
-        const localGen = (skillObjs, n) => {
-          const names = skillObjs.map((s) => (s.name ? s.name : String(s)));
-          const qs = [];
-          let i = 0;
-          while (qs.length < n) {
-            const skill = names[i % names.length];
-            qs.push({
-              id: qs.length,
-              question: `What is ${skill} primarily used for?`,
-              options: [`Web development with ${skill}`, `Database management`, `System programming`, `Mobile apps`],
-              correctAnswer: `Web development with ${skill}`,
-              skill,
-            });
-            i += 1;
-          }
-          return qs.slice(0, n);
-        };
-
-        const fallbackQuestions = localGen(skills, numQuestions);
-        navigate('/test', { state: { questions: fallbackQuestions } });
-        return;
-      } finally {
-        setQuizLoading(false);
-      }
     } catch (err) {
       setResumeError(err.response?.data?.error ?? 'Upload failed. Please try again.');
     } finally {
@@ -120,8 +90,21 @@ export default function ResumeAndTest() {
     setQuizLoading(true);
     setQuizError('');
     try {
+      // Ensure latest skills are persisted so generated quiz includes newly added skills
       const bodySkills = skillsToSend.map(s => (s.name ? s.name : String(s)));
-      const { data } = await api.post('/quiz/generate', { numQuestions: parseInt(numQuestions), difficulty, skills: bodySkills });
+      try {
+        await api.post('/resume/save-skills', { skills: bodySkills });
+      } catch (saveErr) {
+        // non-fatal: continue to generate quiz even if save fails
+        console.warn('Auto-save skills failed before quiz generation:', saveErr?.response?.data || saveErr.message || saveErr);
+      }
+
+      const { data } = await api.post('/quiz/generate', {
+        numQuestions: parseInt(numQuestions),
+        difficulty,
+        skills: bodySkills,
+        resumeText: resumeResult?.text || ''
+      });
       navigate('/test', { state: { questions: data.questions } });
     } catch (err) {
       setQuizError(err.response?.data?.error || 'Failed to generate quiz');
@@ -134,10 +117,36 @@ export default function ResumeAndTest() {
     setExtractedSkills(prev => prev.filter(s => s.name !== name));
   }
 
-  function addSkill(value) {
-    const v = String(value).trim();
+  async function addSkill(value) {
+    const v = String(value || newSkillInput).trim();
     if (!v) return;
-    setExtractedSkills(prev => [{ name: v }, ...prev]);
+
+    // Check if skill already exists
+    const exists = extractedSkills.some(s => s.name.toLowerCase() === v.toLowerCase());
+    if (exists) {
+      setSaveMsg('Skill already exists');
+      setTimeout(() => setSaveMsg(''), 3000);
+      return;
+    }
+
+    // Optimistic update
+    const newSkill = { name: v, confidence: 0.8 };
+    const newList = [newSkill, ...extractedSkills];
+    setExtractedSkills(newList);
+    setNewSkillInput(''); // Clear input
+    setSaveMsg('Adding skill...');
+
+    // Persist immediately to backend; non-fatal if it fails
+    try {
+      const body = newList.map(s => (s.name ? s.name : String(s)));
+      await api.post('/resume/save-skills', { skills: body });
+      setSaveMsg('Skill added and saved');
+    } catch (err) {
+      console.warn('Failed to save skill immediately:', err?.response?.data || err.message || err);
+      setSaveMsg('Skill added locally (save failed)');
+    }
+
+    setTimeout(() => setSaveMsg(''), 3000);
   }
 
   async function handleSaveSkills() {
@@ -170,15 +179,20 @@ export default function ResumeAndTest() {
               <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${step >= 1 ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
                 1
               </motion.div>
-              <div className={`h-1 w-24 mx-3 ${step >= 2 ? 'bg-blue-600' : 'bg-slate-700'}`} />
+              <div className={`h-1 w-16 mx-3 ${step >= 2 ? 'bg-blue-600' : 'bg-slate-700'}`} />
               <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${step >= 2 ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
                 2
+              </motion.div>
+              <div className={`h-1 w-16 mx-3 ${step >= 3 ? 'bg-blue-600' : 'bg-slate-700'}`} />
+              <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${step >= 3 ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                3
               </motion.div>
             </div>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-slate-300">Upload Resume</span>
-            <span className="text-slate-300">Take Test</span>
+            <span className="text-slate-300">Review Skills</span>
+            <span className="text-slate-300">Take Assessment</span>
           </div>
         </div>
 
@@ -231,9 +245,29 @@ export default function ResumeAndTest() {
                             <button onClick={() => removeSkill(s.name)} className="p-1 rounded hover:bg-blue-800"><X className="w-3 h-3" /></button>
                           </div>
                         ))}
-                        <div className="flex items-center gap-2">
-                          <input id="add-skill" placeholder="Add skill" onKeyDown={(e) => { if (e.key === 'Enter') { addSkill(e.target.value); e.target.value=''; } }} className="px-2 py-1 rounded bg-slate-700 text-sm text-slate-200" />
-                          <button onClick={(e) => { const el = document.getElementById('add-skill'); addSkill(el?.value); if (el) el.value=''; }} className="px-2 py-1 bg-slate-700 rounded text-sm">Add</button>
+                        <div className="flex items-center gap-2 mt-2">
+                          <input
+                            value={newSkillInput}
+                            onChange={(e) => setNewSkillInput(e.target.value)}
+                            placeholder="Add a new skill..."
+                            className="flex-1 px-3 py-2 rounded bg-slate-700 text-sm text-slate-200 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (newSkillInput.trim()) {
+                                  addSkill();
+                                }
+                              }
+                            }}
+                          />
+                          <button
+                            onClick={() => addSkill()}
+                            disabled={!newSkillInput.trim()}
+                            className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition"
+                          >
+                            <Plus className="w-4 h-4 inline mr-1" />
+                            Add Skill
+                          </button>
                         </div>
                       </div>
                       <div className="mt-3 flex gap-3">
@@ -248,10 +282,24 @@ export default function ResumeAndTest() {
               </div>
             </div>
 
+            <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+              <div className="text-center">
+                <h3 className="text-lg font-semibold text-white mb-2">Skills Review Complete</h3>
+                <p className="text-slate-400 mb-4">Your skills have been extracted from your resume. You can add or remove skills as needed.</p>
+                <button onClick={() => setStep(3)} className="px-6 py-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-lg font-semibold hover:shadow-lg transition">
+                  Proceed to Assessment
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {step === 3 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-6">
             <div className="bg-slate-800 rounded-lg border border-slate-700 p-8">
               <div className="flex items-center gap-3 mb-6">
                 <Zap className="w-6 h-6 text-amber-400" />
-                <h2 className="text-2xl font-bold text-white">Configure Your Test</h2>
+                <h2 className="text-2xl font-bold text-white">Configure Your Assessment</h2>
               </div>
 
               <div className="space-y-6">
@@ -277,8 +325,8 @@ export default function ResumeAndTest() {
                 {quizError && <div className="bg-red-900/20 border border-red-500/50 rounded-lg p-4 text-red-400 text-sm">{quizError}</div>}
 
                 <div className="flex gap-3 pt-4">
-                  <button onClick={() => handleStartQuiz()} disabled={quizLoading} className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50">{quizLoading ? 'Generating...' : 'Start Test'}</button>
-                  <button onClick={handleReset} disabled={quizLoading} className="px-6 py-3 border border-slate-600 text-slate-300 rounded-lg">Back</button>
+                  <button onClick={() => handleStartQuiz()} disabled={quizLoading} className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-lg font-semibold hover:shadow-lg transition disabled:opacity-50">{quizLoading ? 'Generating...' : 'Start Assessment'}</button>
+                  <button onClick={() => setStep(2)} disabled={quizLoading} className="px-6 py-3 border border-slate-600 text-slate-300 rounded-lg">Back</button>
                 </div>
               </div>
             </div>

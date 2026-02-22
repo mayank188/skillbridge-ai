@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { gradeQuiz } from '../utils/gradeQuiz';
+import api from '../lib/axios';
 
 function formatTime(ms) {
   const totalSeconds = Math.floor(ms / 1000);
@@ -14,6 +15,7 @@ export default function Test() {
   const navigate = useNavigate();
   const questions = location.state?.questions ?? [];
 
+  const submittingRef = useRef(false); // synchronous guard to prevent race conditions
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState(() => questions.map(() => null));
   const [startTime] = useState(() => Date.now());
@@ -36,9 +38,51 @@ export default function Test() {
   }
 
   function handleSubmit() {
-    const summary = gradeQuiz(questions, answers);
-    setResult(summary);
-    setSubmitted(true);
+    // Use synchronous ref to prevent race conditions from rapid clicks
+    if (submittingRef.current || submitted) return;
+    submittingRef.current = true;
+
+    try {
+      if (questions.length === 0) {
+        console.warn('[Test.jsx] No questions to submit');
+        return;
+      }
+
+      // ensure answers array length matches questions (fill unanswered with null)
+      const safeAnswers = questions.map((_, i) => (i < answers.length ? answers[i] : null));
+
+      const summary = gradeQuiz(questions, safeAnswers);
+      setResult(summary);
+      setSubmitted(true);
+
+      // Submit to backend (fire-and-forget)
+      (async () => {
+        try {
+          const duration = Math.floor(elapsed / 1000); // seconds
+          const payload = {
+            questions,
+            answers: safeAnswers,
+            duration,
+            difficulty: questions[0]?.difficulty || 'intermediate',
+          };
+          console.log('[Test.jsx] Submitting quiz:', {
+            questionsCount: questions.length,
+            answersCount: safeAnswers.length,
+            payload,
+          });
+          const res = await api.post('/quiz/submit', payload);
+          console.log('[Test.jsx] Quiz submitted successfully:', res.data);
+        } catch (error) {
+          // log and show non-blocking feedback
+          console.error('[Test.jsx] Failed to submit quiz to backend:', error.response?.data || error.message || error);
+        }
+      })();
+    } catch (err) {
+      submittingRef.current = false; // reset flag on error
+      console.error('Error grading quiz locally:', err);
+      // fallback: show basic alert so user knows submission didn't complete
+      alert('Failed to submit the quiz. Please try again or contact support.');
+    }
   }
 
   if (questions.length === 0) {
@@ -96,6 +140,84 @@ export default function Test() {
                 </ul>
               </div>
             )}
+
+            {result.details?.length > 0 && (
+              <div className="mb-6">
+                <h2 className="text-lg font-medium text-gray-800 mb-4">Detailed Results</h2>
+                <div className="space-y-4">
+                  {result.details.map((detail, index) => (
+                    <div key={index} className="border border-gray-200 rounded-lg p-4">
+                      <div className="flex items-start justify-between mb-2">
+                        <h3 className="text-sm font-medium text-gray-800 flex-1">
+                          Question {index + 1}: {detail.question}
+                        </h3>
+                        <span className={`px-2 py-1 text-xs rounded-full ${
+                          detail.correct
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {detail.correct ? 'Correct' : 'Incorrect'}
+                        </span>
+                      </div>
+
+                      <div className="text-sm text-gray-600 mb-2">
+                        <strong>Skill:</strong> {detail.skill}
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="text-sm">
+                          <strong>Your Answer:</strong>{' '}
+                          <span className={detail.correct ? 'text-green-600' : 'text-red-600'}>
+                            {detail.userAnswer !== null && detail.userAnswer !== undefined
+                              ? (Array.isArray(detail.options) && detail.options[detail.userAnswer] !== undefined
+                                  ? detail.options[detail.userAnswer]
+                                  : detail.userAnswer)
+                              : 'Not answered'}
+                          </span>
+                        </div>
+
+                        {!detail.correct && (
+                          <div className="text-sm">
+                            <strong>Correct Answer:</strong>{' '}
+                            <span className="text-green-600 font-medium">
+                              {detail.correctAnswer}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {Array.isArray(detail.options) && detail.options.length > 0 && (
+                        <div className="mt-3">
+                          <strong className="text-sm text-gray-700">All Options:</strong>
+                          <ul className="mt-1 space-y-1">
+                            {detail.options.map((option, optIndex) => (
+                              <li
+                                key={optIndex}
+                                className={`text-sm px-2 py-1 rounded ${
+                                  option === detail.correctAnswer
+                                    ? 'bg-green-50 text-green-800 border border-green-200'
+                                    : option === (Array.isArray(detail.options) && detail.options[detail.userAnswer] !== undefined ? detail.options[detail.userAnswer] : detail.userAnswer) && !detail.correct
+                                    ? 'bg-red-50 text-red-800 border border-red-200'
+                                    : 'text-gray-600'
+                                }`}
+                              >
+                                {optIndex + 1}. {option}
+                                {option === detail.correctAnswer && (
+                                  <span className="ml-2 text-green-600 font-medium">(Correct)</span>
+                                )}
+                                {option === (Array.isArray(detail.options) && detail.options[detail.userAnswer] !== undefined ? detail.options[detail.userAnswer] : detail.userAnswer) && !detail.correct && (
+                                  <span className="ml-2 text-red-600 font-medium">(Your Answer)</span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <Link
               to="/candidate"
               className="inline-block px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
@@ -114,9 +236,9 @@ export default function Test() {
                     {i + 1}. {d.question}
                   </p>
                   <p className={d.correct ? 'text-green-600' : 'text-red-600'}>
-                    Your answer: {d.userAnswer != null ? String(d.userAnswer) : '—'}
-                    {!d.correct && ` · Correct: ${d.correctAnswer}`}
-                  </p>
+                        Your answer: {d.userAnswer != null ? (Array.isArray(d.options) && typeof d.userAnswer === 'number' ? d.options[d.userAnswer] : String(d.userAnswer)) : '—'}
+                        {!d.correct && ` · Correct: ${d.correctAnswer}`}
+                      </p>
                 </div>
               ))}
             </div>
@@ -134,13 +256,21 @@ export default function Test() {
             Exit test
           </Link>
           <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-gray-700 tabular-nums">
-              {formatTime(elapsed)}
-            </span>
-            <span className="text-sm text-gray-500">
-              Question {currentIndex + 1} of {questions.length}
-            </span>
-          </div>
+              <span className="text-sm font-medium text-gray-700 tabular-nums">
+                {formatTime(elapsed)}
+              </span>
+              <span className="text-sm text-gray-500">
+                Question {currentIndex + 1} of {questions.length}
+              </span>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={submitted}
+                className="ml-4 px-3 py-1 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-60"
+              >
+                Submit test
+              </button>
+            </div>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
@@ -153,13 +283,12 @@ export default function Test() {
 
           <div className="space-y-2">
             {(current?.options ?? []).map((option, optionIndex) => {
-              const isSelected =
-                answers[currentIndex] === option || answers[currentIndex] === optionIndex;
+              const isSelected = answers[currentIndex] === optionIndex;
               return (
                 <button
                   key={optionIndex}
                   type="button"
-                  onClick={() => setAnswer(currentIndex, option)}
+                  onClick={() => setAnswer(currentIndex, optionIndex)}
                   className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-colors ${
                     isSelected
                       ? 'border-blue-600 bg-blue-50 text-gray-900'
@@ -188,7 +317,8 @@ export default function Test() {
               <button
                 type="button"
                 onClick={handleSubmit}
-                className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700"
+                disabled={submitted}
+                className="px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-60"
               >
                 Submit test
               </button>

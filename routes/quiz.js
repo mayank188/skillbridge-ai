@@ -10,6 +10,37 @@ const {
 
 const router = express.Router();
 
+// Debug route: submit quiz without auth when running in non-production
+if (process.env.NODE_ENV !== 'production') {
+  router.post('/debug/submit', async (req, res, next) => {
+    console.log('[quiz.debug.submit] Raw body keys:', Object.keys(req.body));
+    console.log('[quiz.debug.submit] Body:', JSON.stringify(req.body).substring(0, 300));
+    try {
+      const { questions, answers } = req.body;
+      console.log('[quiz.debug.submit] Validation:', {
+        questionsIsArray: Array.isArray(questions),
+        answersIsArray: Array.isArray(answers),
+        questionsLen: Array.isArray(questions) ? questions.length : null,
+        answersLen: Array.isArray(answers) ? answers.length : null,
+      });
+      if (!Array.isArray(questions) || !Array.isArray(answers)) {
+        return res.status(400).json({
+          error: 'Invalid payload',
+          debug: {
+            questionsIsArray: Array.isArray(questions),
+            answersIsArray: Array.isArray(answers),
+            questionsType: typeof questions,
+            answersType: typeof answers,
+          },
+        });
+      }
+      return res.json({ debug: 'Payload structure OK', questionsLen: questions.length, answersLen: answers.length });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+}
+
 // All routes require authentication and candidate role
 router.use(authenticate);
 router.use(requireRole('candidate'));
