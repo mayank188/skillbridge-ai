@@ -4,6 +4,7 @@ const aiService = require('../services/aiService');
 const {
   generateQuiz,
   submitQuiz,
+  proctorSnapshot,
   getTestHistory,
   getTestResult,
 } = require('../controllers/quizController');
@@ -39,6 +40,17 @@ if (process.env.NODE_ENV !== 'production') {
       return res.status(500).json({ error: err.message });
     }
   });
+
+  // Debug proctor snapshot (no auth) for local testing
+  router.post('/debug/proctor', async (req, res) => {
+    try {
+      const result = await (require('../controllers/quizController').proctorSnapshot)(req, res);
+      // controller already sends response; just return
+      return result;
+    } catch (err) {
+      return res.status(500).json({ error: err.message || 'debug proctor failed' });
+    }
+  });
 }
 
 // All routes require authentication and candidate role
@@ -62,6 +74,7 @@ if (process.env.NODE_ENV !== 'production') {
 // Quiz endpoints
 router.post('/generate', generateQuiz);
 router.post('/submit', submitQuiz);
+router.post('/proctor/snapshot', proctorSnapshot);
 router.get('/history', getTestHistory);
 router.get('/result/:testId', getTestResult);
 
