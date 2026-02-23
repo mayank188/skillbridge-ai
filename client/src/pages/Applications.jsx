@@ -25,8 +25,19 @@ export default function Applications() {
   const fetchApplications = async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/applications');
-      setApplications(data.applications || data);
+      const { data } = await api.get('/candidate/applications/recent');
+      // Transform data to match expected format: list of applications with job/company info
+      const list = Array.isArray(data) ? data.map((app) => ({
+        _id: app._id,
+        jobId: app.jobId?._id || app.jobId,
+        jobTitle: app.jobId?.title || 'Position',
+        companyName: app.jobId?.company || 'Company',
+        status: app.status,
+        appliedAt: app.createdAt,
+        statusUpdatedAt: app.updatedAt || app.createdAt,
+        matchScore: app.matchScore || 0,
+      })) : [];
+      setApplications(list);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to fetch applications');
     } finally {

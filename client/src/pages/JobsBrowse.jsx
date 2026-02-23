@@ -24,9 +24,11 @@ export default function Jobs() {
   const fetchJobs = async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/jobs');
-      setJobs(data.jobs || data);
-      setFilteredJobs(data.jobs || data);
+      const { data } = await api.get('/candidate/jobs');
+      // candidate endpoint returns an array of jobs with match info
+      const list = Array.isArray(data) ? data : data.jobs || [];
+      setJobs(list);
+      setFilteredJobs(list);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to fetch jobs');
     } finally {
@@ -73,7 +75,7 @@ export default function Jobs() {
 
   const handleApply = async (jobId) => {
     try {
-      await api.post(`/jobs/${jobId}/apply`);
+      await api.post('/candidate/jobs/apply', { jobId });
       alert('Application submitted successfully!');
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to apply for job');

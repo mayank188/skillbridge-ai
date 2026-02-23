@@ -59,9 +59,7 @@ export default function ResumeUpload() {
     try {
       const formData = new FormData();
       formData.append('resume', file);
-      const { data } = await api.post('/resume/upload', formData, {
-        headers: { 'Content-Type': undefined },
-      });
+      const { data } = await api.post('/resume/upload', formData);
       setResult(data);
     } catch (err) {
       setError(err.response?.data?.error ?? 'Upload failed. Please try again.');
