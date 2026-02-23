@@ -23,9 +23,11 @@ export default function Test() {
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState(null);
   const videoRef = useRef(null);
+  const audioRef = useRef(null);
   const canvasRef = useRef(null);
   const proctorIntervalRef = useRef(null);
   const [cameraAllowed, setCameraAllowed] = useState(null); // null=pending, false=denied, true=granted
+  const [micAllowed, setMicAllowed] = useState(null); // null=pending, false=denied, true=granted
   const sessionIdRef = useRef(`sess_${Date.now()}_${Math.random().toString(36).slice(2,8)}`);
 
   useEffect(() => {
@@ -35,51 +37,72 @@ export default function Test() {
   }, [startTime, submitted, questions.length]);
 
   // Proctoring: request camera and start periodic snapshots
-  useEffect(() => {
-    if (questions.length === 0 || submitted) return undefined;
-
-    let mounted = true;
-
-    async function startProctoring() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        if (!mounted) return;
-        setCameraAllowed(true);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(() => {});
-        }
-
-        // capture every 30s
-        proctorIntervalRef.current = setInterval(async () => {
-          try {
-            const video = videoRef.current;
-            if (!video) return;
-            const w = 320;
-            const h = Math.round((video.videoHeight / video.videoWidth) * w) || 240;
-            const canvas = canvasRef.current;
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, w, h);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-            // send snapshot (do not persist on server by agreement)
-            await api.post('/quiz/proctor/snapshot', {
-              sessionId: sessionIdRef.current,
-              timestamp: Date.now(),
-              image: dataUrl,
-            });
-          } catch (e) {
-            console.error('[Proctor] snapshot error', e?.response?.data || e.message || e);
-          }
-        }, 30 * 1000);
-      } catch (err) {
-        console.warn('[Proctor] camera access denied or error', err);
-        if (mounted) setCameraAllowed(false);
+  async function startProctoring() {
+    // stop any previous interval/stream
+    try {
+      if (proctorIntervalRef.current) {
+        clearInterval(proctorIntervalRef.current);
+        proctorIntervalRef.current = null;
       }
+      if (videoRef.current && videoRef.current.srcObject) {
+        const prevTracks = videoRef.current.srcObject.getTracks();
+        prevTracks.forEach((t) => t.stop());
+        videoRef.current.srcObject = null;
+      }
+    } catch (e) {
+      console.warn('[Proctor] cleanup error', e);
     }
 
-    startProctoring();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setCameraAllowed(true);
+      setMicAllowed(true);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      }
+      if (audioRef.current) {
+        audioRef.current.srcObject = stream;
+      }
+
+      // capture every 30s
+      proctorIntervalRef.current = setInterval(async () => {
+        try {
+          const video = videoRef.current;
+          if (!video) return;
+          const w = 320;
+          const h = Math.round((video.videoHeight / video.videoWidth) * w) || 240;
+          const canvas = canvasRef.current;
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(video, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+          // send snapshot (do not persist on server by agreement)
+          await api.post('/quiz/proctor/snapshot', {
+            sessionId: sessionIdRef.current,
+            timestamp: Date.now(),
+            image: dataUrl,
+          });
+        } catch (e) {
+          console.error('[Proctor] snapshot error', e?.response?.data || e.message || e);
+        }
+      }, 30 * 1000);
+    } catch (err) {
+      console.warn('[Proctor] camera/mic access denied or error', err);
+      setCameraAllowed(false);
+      setMicAllowed(false);
+      throw err;
+    }
+  }
+
+  useEffect(() => {
+    if (questions.length === 0 || submitted) return undefined;
+    let mounted = true;
+    // start proctoring on mount
+    startProctoring().catch(() => {
+      if (mounted) setCameraAllowed(false);
+    });
 
     return () => {
       mounted = false;
@@ -88,6 +111,11 @@ export default function Test() {
         const tracks = videoRef.current.srcObject.getTracks();
         tracks.forEach((t) => t.stop());
         videoRef.current.srcObject = null;
+      }
+      if (audioRef.current && audioRef.current.srcObject) {
+        const tracks = audioRef.current.srcObject.getTracks();
+        tracks.forEach((t) => t.stop());
+        audioRef.current.srcObject = null;
       }
     };
   }, [questions.length, submitted]);
@@ -163,31 +191,30 @@ export default function Test() {
   }
 
   // If camera access was explicitly denied, block the test and ask user to retry
-  if (cameraAllowed === false) {
+  if (cameraAllowed === false || micAllowed === false) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl border border-gray-200 p-8 text-center max-w-md">
-          <h1 className="text-xl font-semibold text-gray-800 mb-2">Camera required</h1>
-          <p className="text-gray-600 mb-4">This test requires camera access for proctoring. Please allow camera access to continue.</p>
+          <h1 className="text-xl font-semibold text-gray-800 mb-2">Camera & Microphone Required</h1>
+          <p className="text-gray-600 mb-4">This test requires camera and microphone access for proctoring. Please allow both to continue.</p>
           <div className="flex gap-3 justify-center">
             <button
+              id="retry-camera-btn"
               type="button"
               onClick={async () => {
                 try {
-                  const s = await navigator.mediaDevices.getUserMedia({ video: true });
-                  if (videoRef.current) {
-                    videoRef.current.srcObject = s;
-                    videoRef.current.play().catch(() => {});
-                  }
+                  await startProctoring();
                   setCameraAllowed(true);
+                  setMicAllowed(true);
                 } catch (e) {
-                  console.warn('Retry camera failed', e);
+                  console.warn('Retry camera/mic failed', e);
                   setCameraAllowed(false);
+                  setMicAllowed(false);
                 }
               }}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg"
             >
-              Retry camera
+              Retry
             </button>
             <Link to="/candidate" className="px-4 py-2 border rounded-lg text-gray-700">
               Exit test
@@ -344,7 +371,7 @@ export default function Test() {
           </details>
         </div>
         {/* hidden video & canvas used for periodic snapshots */}
-        <video ref={videoRef} style={{ display: 'none' }} playsInline muted />
+        <video id="proctor-video" ref={videoRef} style={{ display: 'none' }} playsInline muted />
         <canvas ref={canvasRef} style={{ display: 'none' }} />
       </div>
     );
@@ -406,6 +433,16 @@ export default function Test() {
             })}
           </div>
 
+          {/* Media Status */}
+          <div className="mt-4 p-3 bg-gray-100 rounded-lg flex items-center gap-3 text-sm">
+            <span className={`inline-flex items-center gap-1 ${cameraAllowed ? 'text-green-600' : 'text-red-600'}`}>
+              📹 {cameraAllowed ? 'Camera On' : 'Camera Off'}
+            </span>
+            <span className={`inline-flex items-center gap-1 ${micAllowed ? 'text-green-600' : 'text-red-600'}`}>
+              🎤 {micAllowed ? 'Microphone On' : 'Microphone Off'}
+            </span>
+          </div>
+
           <div className="flex justify-between mt-8 pt-6 border-t border-gray-200">
             <button
               type="button"
@@ -455,8 +492,9 @@ export default function Test() {
           ))}
         </div>
       </div>
-        {/* hidden video & canvas used for periodic snapshots */}
-        <video ref={videoRef} style={{ display: 'none' }} playsInline muted />
+        {/* hidden video, audio & canvas used for periodic snapshots and audio capture */}
+        <video id="proctor-video" ref={videoRef} style={{ display: 'none' }} playsInline muted />
+        <audio id="proctor-audio" ref={audioRef} style={{ display: 'none' }} />
         <canvas ref={canvasRef} style={{ display: 'none' }} />
       </div>
     );

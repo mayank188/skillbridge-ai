@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Clock, AlertCircle } from 'lucide-react';
+import { Clock, AlertCircle, Video, Mic } from 'lucide-react';
 import api from '../lib/axios';
 import { DashboardLayout } from '../components/DashboardLayout';
 
 export default function Quiz() {
   const navigate = useNavigate();
+  const videoRef = useRef(null);
+  const audioRef = useRef(null);
   const [stage, setStage] = useState('start'); // start, generating, quiz, results
   const [questions, setQuestions] = useState([]);
   const [answers, setAnswers] = useState([]);
@@ -17,13 +19,64 @@ export default function Quiz() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [results, setResults] = useState(null);
+  const [cameraAllowed, setCameraAllowed] = useState(null);
+  const [micAllowed, setMicAllowed] = useState(null);
 
-  // Timer effect
+  // Request camera and microphone on component mount
   useEffect(() => {
-    if (stage === 'quiz' && timeLeft > 0) {
-      const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
-      return () => clearTimeout(timer);
-    } else if (stage === 'quiz' && timeLeft === 0 && questions.length > 0) {
+    if (stage !== 'quiz') return;
+    let mounted = true;
+
+    async function startMediaDevices() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        if (mounted) {
+          setCameraAllowed(true);
+          setMicAllowed(true);
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.play().catch(() => {});
+          }
+          if (audioRef.current) {
+            audioRef.current.srcObject = stream;
+          }
+        }
+      } catch (err) {
+        console.warn('[Quiz] camera/mic access denied', err);
+        if (mounted) {
+          setCameraAllowed(false);
+          setMicAllowed(false);
+        }
+      }
+    }
+
+    startMediaDevices();
+
+    return () => {
+      mounted = false;
+      if (videoRef.current && videoRef.current.srcObject) {
+        const tracks = videoRef.current.srcObject.getTracks();
+        tracks.forEach((t) => t.stop());
+        videoRef.current.srcObject = null;
+      }
+      if (audioRef.current && audioRef.current.srcObject) {
+        const tracks = audioRef.current.srcObject.getTracks();
+        tracks.forEach((t) => t.stop());
+        audioRef.current.srcObject = null;
+      }
+    };
+  }, [stage]);
+
+  // Timer effect - only runs when timeLeft > 0
+  useEffect(() => {
+    if (stage !== 'quiz' || timeLeft <= 0) return;
+    const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [timeLeft, stage]);
+
+  // Submit effect - auto-submit when time runs out
+  useEffect(() => {
+    if (stage === 'quiz' && timeLeft === 0 && questions.length > 0) {
       handleSubmitQuiz();
     }
   }, [timeLeft, stage, questions.length]);
@@ -211,6 +264,14 @@ export default function Quiz() {
                   </motion.button>
                 ))}
               </div>
+
+              {/* Media Status */}
+              <div className="mt-6 p-3 bg-slate-700/50 rounded-lg flex items-center gap-2">
+                <Video className={`w-4 h-4 ${cameraAllowed ? 'text-green-400' : 'text-red-400'}`} />
+                <span className="text-xs text-slate-300">{cameraAllowed ? 'Camera On' : 'Camera Unavailable'}</span>
+                <Mic className={`w-4 h-4 ml-3 ${micAllowed ? 'text-green-400' : 'text-red-400'}`} />
+                <span className="text-xs text-slate-300">{micAllowed ? 'Microphone On' : 'Microphone Unavailable'}</span>
+              </div>
             </motion.div>
 
             {/* Navigation */}
@@ -355,6 +416,10 @@ export default function Quiz() {
           <p className="mt-4 text-slate-400">Loading...</p>
         </div>
       </div>
+      {/* Hidden camera and microphone */}
+      <video id="quiz-video" ref={videoRef} style={{ display: 'none' }} playsInline muted />
+      <audio id="quiz-audio" ref={audioRef} style={{ display: 'none' }} />
     </DashboardLayout>
   );
 }
+

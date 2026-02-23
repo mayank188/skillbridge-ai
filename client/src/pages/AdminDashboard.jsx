@@ -1,17 +1,23 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Users, FileText, BarChart3, TrendingUp, AlertCircle, CheckCircle } from 'lucide-react';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { Users, FileText, BarChart3, TrendingUp, AlertCircle, CheckCircle, ArrowUpRight, ArrowDownRight, User, Briefcase } from 'lucide-react';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
 import api from '../lib/axios';
 import { DashboardLayout } from '../components/DashboardLayout';
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'];
+const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalJobs: 0,
     totalApplications: 0,
+    totalCandidates: 0,
+    totalRecruiters: 0,
+    totalTests: 0,
+    avgTestScore: 0,
+    skillDistribution: [],
+    mostDemandedSkills: [],
     platformHealth: 'good',
   });
   const [users, setUsers] = useState([]);
@@ -19,6 +25,11 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [growthMetrics, setGrowthMetrics] = useState({
+    candidateGrowth: 15,
+    recruiterGrowth: 8,
+    applicationGrowth: 25,
+  });
 
   useEffect(() => {
     fetchAdminData();
@@ -27,15 +38,24 @@ export default function AdminDashboard() {
   const fetchAdminData = async () => {
     setLoading(true);
     try {
-      const [statsRes, usersRes, modRes] = await Promise.all([
+      const [statsRes, usersRes, modRes, analyticsRes] = await Promise.all([
         api.get('/admin/stats'),
         api.get('/admin/users'),
         api.get('/admin/moderation-queue'),
+        api.get('/admin/analytics'),
       ]);
 
       setStats(statsRes.data);
       setUsers(usersRes.data.users || usersRes.data);
       setModerationQueue(modRes.data.queue || modRes.data);
+      
+      // Extract analytics data if available
+      if (analyticsRes.data) {
+        setStats((prev) => ({
+          ...prev,
+          ...analyticsRes.data,
+        }));
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to fetch admin data');
     } finally {
@@ -118,14 +138,28 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {/* Stats Grid - Key Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
           <StatCard
             icon={Users}
             label="Total Users"
             value={stats.totalUsers}
             color="bg-blue-500/20 text-blue-400"
-            trend={12}
+            trend={growthMetrics.candidateGrowth}
+          />
+          <StatCard
+            icon={User}
+            label="Candidates"
+            value={stats.totalCandidates || stats.totalUsers * 0.7}
+            color="bg-green-500/20 text-green-400"
+            trend={growthMetrics.candidateGrowth}
+          />
+          <StatCard
+            icon={Briefcase}
+            label="Recruiters"
+            value={stats.totalRecruiters || stats.totalUsers * 0.25}
+            color="bg-blue-500/20 text-blue-400"
+            trend={growthMetrics.recruiterGrowth}
           />
           <StatCard
             icon={FileText}
@@ -139,12 +173,12 @@ export default function AdminDashboard() {
             label="Applications"
             value={stats.totalApplications}
             color="bg-green-500/20 text-green-400"
-            trend={25}
+            trend={growthMetrics.applicationGrowth}
           />
           <StatCard
             icon={CheckCircle}
-            label="Platform Health"
-            value={stats.platformHealth === 'good' ? '✓ Good' : '⚠ Alert'}
+            label="Avg Test Score"
+            value={`${stats.avgTestScore}%`}
             color="bg-orange-500/20 text-orange-400"
           />
         </div>
@@ -168,45 +202,90 @@ export default function AdminDashboard() {
 
         {/* Overview Tab */}
         {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* User Distribution */}
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-              <h3 className="text-lg font-bold mb-4">User Distribution</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={[
-                      { name: 'Candidates', value: Math.floor(stats.totalUsers * 0.7) },
-                      { name: 'Recruiters', value: Math.floor(stats.totalUsers * 0.25) },
-                      { name: 'Admins', value: Math.floor(stats.totalUsers * 0.05) },
-                    ]}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, value }) => `${name}: ${value}`}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {COLORS.map((color, index) => (
-                      <Cell key={`cell-${index}`} fill={color} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569' }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </motion.div>
+          <div className="space-y-6">
+            {/* First Row - Distribution Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* User Distribution */}
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+                <h3 className="text-lg font-bold mb-4">User Distribution</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: 'Candidates', value: stats.totalCandidates || Math.floor(stats.totalUsers * 0.7) },
+                        { name: 'Recruiters', value: stats.totalRecruiters || Math.floor(stats.totalUsers * 0.25) },
+                        { name: 'Admins', value: Math.floor(stats.totalUsers * 0.05) },
+                      ]}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={({ name, value }) => `${name}: ${value}`}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {COLORS.map((color, index) => (
+                        <Cell key={`cell-${index}`} fill={color} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </motion.div>
 
-            {/* Platform Analytics */}
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }} className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-              <h3 className="text-lg font-bold mb-4">Activity Trend</h3>
+              {/* Growth Trends */}
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }} className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+                <h3 className="text-lg font-bold mb-4">Growth Metrics (vs Last Month)</h3>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between p-3 bg-slate-700/30 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <User className="w-5 h-5 text-green-400" />
+                      <span className="text-slate-300">Candidate Growth</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ArrowUpRight className="w-5 h-5 text-green-400" />
+                      <span className="font-bold text-green-400">+{growthMetrics.candidateGrowth}%</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-slate-700/30 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <Briefcase className="w-5 h-5 text-blue-400" />
+                      <span className="text-slate-300">Recruiter Growth</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {growthMetrics.recruiterGrowth > 0 ? 
+                        <ArrowUpRight className="w-5 h-5 text-green-400" /> :
+                        <ArrowDownRight className="w-5 h-5 text-red-400" />
+                      }
+                      <span className={`font-bold ${growthMetrics.recruiterGrowth > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {growthMetrics.recruiterGrowth > 0 ? '+' : ''}{growthMetrics.recruiterGrowth}%
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-slate-700/30 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <TrendingUp className="w-5 h-5 text-purple-400" />
+                      <span className="text-slate-300">Application Growth</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <ArrowUpRight className="w-5 h-5 text-green-400" />
+                      <span className="font-bold text-green-400">+{growthMetrics.applicationGrowth}%</span>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+
+            {/* Second Row - Activity Trend */}
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+              <h3 className="text-lg font-bold mb-4">Activity Trends (Last 4 Months)</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart
                   data={[
-                    { month: 'Jan', applications: 40, hires: 8 },
-                    { month: 'Feb', applications: 65, hires: 12 },
-                    { month: 'Mar', applications: 55, hires: 10 },
-                    { month: 'Apr', applications: 85, hires: 18 },
+                    { month: 'Jan', applications: 40, candidates: 25, recruiters: 8 },
+                    { month: 'Feb', applications: 65, candidates: 35, recruiters: 12 },
+                    { month: 'Mar', applications: 55, candidates: 30, recruiters: 10 },
+                    { month: 'Apr', applications: 85, candidates: 45, recruiters: 18 },
                   ]}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
@@ -215,10 +294,30 @@ export default function AdminDashboard() {
                   <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569' }} />
                   <Legend />
                   <Bar dataKey="applications" fill="#3b82f6" radius={[8, 8, 0, 0]} />
-                  <Bar dataKey="hires" fill="#10b981" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="candidates" fill="#10b981" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="recruiters" fill="#f59e0b" radius={[8, 8, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </motion.div>
+
+            {/* Third Row - Skills Analytics */}
+            {stats.mostDemandedSkills && stats.mostDemandedSkills.length > 0 && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+                <h3 className="text-lg font-bold mb-4">Most Demanded Skills</h3>
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart
+                    layout="vertical"
+                    data={stats.mostDemandedSkills.slice(0, 8)}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                    <XAxis type="number" stroke="#94a3b8" />
+                    <YAxis dataKey="skill" type="category" stroke="#94a3b8" width={100} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569' }} />
+                    <Bar dataKey="demand" fill="#8b5cf6" radius={[0, 8, 8, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </motion.div>
+            )}
           </div>
         )}
 
