@@ -13,6 +13,12 @@ const jobSchema = new mongoose.Schema(
       trim: true,
       maxlength: [200, 'Title cannot exceed 200 characters'],
     },
+    company: {
+      type: String,
+      trim: true,
+      maxlength: [200, 'Company name cannot exceed 200 characters'],
+      default: '',
+    },
     description: {
       type: String,
       required: [true, 'Job description is required'],

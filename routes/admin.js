@@ -6,6 +6,7 @@ const {
   toggleUserStatus,
   getAllJobs,
   toggleJobStatus,
+  getModerationQueue,
 } = require('../controllers/adminController');
 
 const router = express.Router();
@@ -14,7 +15,8 @@ const router = express.Router();
 router.use(authenticate);
 router.use(requireRole('admin'));
 
-// Analytics
+// Analytics - support both /stats and /analytics
+router.get('/stats', getPlatformAnalytics);
 router.get('/analytics', getPlatformAnalytics);
 
 // User management
@@ -24,5 +26,8 @@ router.patch('/users/:userId/status', toggleUserStatus);
 // Job management
 router.get('/jobs', getAllJobs);
 router.patch('/jobs/:jobId/status', toggleJobStatus);
+
+// Moderation queue
+router.get('/moderation-queue', getModerationQueue);
 
 module.exports = router;

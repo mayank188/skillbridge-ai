@@ -200,10 +200,36 @@ async function toggleJobStatus(req, res, next) {
   }
 }
 
+/**
+ * Get moderation queue for pending job approvals
+ */
+async function getModerationQueue(req, res, next) {
+  try {
+    // Get pending jobs awaiting approval/rejection
+    const pendingJobs = await Job.find({ status: 'pending' || null })
+      .populate('recruiterId', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      queue: pendingJobs.map((job) => ({
+        _id: job._id,
+        title: job.title,
+        company: job.company,
+        description: job.description,
+        submittedBy: job.recruiterId?.name || 'Unknown',
+        createdAt: job.createdAt,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getPlatformAnalytics,
   getAllUsers,
   toggleUserStatus,
   getAllJobs,
   toggleJobStatus,
+  getModerationQueue,
 };

@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Briefcase, Plus, LogOut, Trash2, Star, Users, TrendingUp, CheckCircle, AlertCircle, Eye, Zap } from 'lucide-react';
+import { DashboardLayout } from '../components/DashboardLayout';
 import api from '../lib/axios';
 
 const JOB_TYPES = [
@@ -34,6 +35,8 @@ export default function RecruiterDashboard() {
   const [filterSkills, setFilterSkills] = useState([]);
   const [matchMode, setMatchMode] = useState('all'); // 'all' or 'any'
   const [jobRequiredSkills, setJobRequiredSkills] = useState([]);
+  const [testDifficultyFilter, setTestDifficultyFilter] = useState('all'); // all, beginner, intermediate, advanced, notested
+  const [answerLevelFilter, setAnswerLevelFilter] = useState('all'); // all, beginner, intermediate, advanced, none
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -101,6 +104,9 @@ export default function RecruiterDashboard() {
   function clearFilters() {
     setFilterSkills([]);
     setMatchMode('all');
+    setTestDifficultyFilter('all');
+    setAnswerLevelFilter('all');
+    setFilterText('');
   }
 
   async function handleCreateJob(e) {
@@ -143,50 +149,10 @@ export default function RecruiterDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-      {/* Animated background elements */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <motion.div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-500/20 rounded-full blur-3xl" animate={{ y: [0, 100, 0] }} transition={{ duration: 8, repeat: Infinity }} />
-        <motion.div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-500/20 rounded-full blur-3xl" animate={{ y: [0, -100, 0] }} transition={{ duration: 6, repeat: Infinity }} />
-        <motion.div className="absolute top-1/2 left-1/2 w-96 h-96 bg-pink-500/10 rounded-full blur-3xl" animate={{ scale: [1, 1.2, 1] }} transition={{ duration: 7, repeat: Infinity }} />
-      </div>
-
-      {/* Header */}
-      <motion.header className="relative z-10 border-b border-white/10 backdrop-blur-md bg-white/5 sticky top-0 shadow-xl" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}>
-        <div className="max-w-7xl mx-auto px-6 py-6 flex items-center justify-between">
-          <motion.div className="flex items-center gap-3" whileHover={{ scale: 1.05 }}>
-            <div className="p-2 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl">
-              <Briefcase className="w-7 h-7 text-white" />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">Recruiter DashBoard</h1>
-              <p className="text-xs text-gray-400">Find & manage top talent</p>
-            </div>
-          </motion.div>
-          <motion.div className="flex items-center gap-4" whileHover={{ scale: 1.02 }}>
-            <div className="text-right">
-              <p className="text-sm font-medium text-white">{user?.name ?? user?.email}</p>
-              <p className="text-xs text-gray-400">{user?.email}</p>
-            </div>
-            <motion.button
-              onClick={() => {
-                logout();
-                navigate('/login');
-              }}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.95 }}
-              className="p-2 bg-gradient-to-br from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white rounded-lg transition shadow-lg hover:shadow-red-500/50"
-            >
-              <LogOut className="w-5 h-5" />
-            </motion.button>
-          </motion.div>
-        </div>
-      </motion.header>
-
-      {/* Main Content */}
+    <DashboardLayout role="recruiter">
       <main className="relative z-10 max-w-7xl mx-auto p-6 space-y-8">
         {/* Welcome Section */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+        <motion.div id="dashboard" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
           <div className="bg-gradient-to-r from-blue-600/20 via-purple-600/20 to-pink-600/20 border border-white/20 backdrop-blur-lg rounded-3xl p-8 text-white overflow-hidden relative">
             <div className="absolute -right-20 -top-20 w-40 h-40 bg-purple-500/30 rounded-full blur-3xl" />
             <div className="relative">
@@ -197,7 +163,7 @@ export default function RecruiterDashboard() {
         </motion.div>
 
         {/* Create Job Button & Form */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}>
+        <motion.div id="jobs" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7 }}>
           <motion.button
             type="button"
             onClick={() => setShowForm((v) => !v)}
@@ -338,7 +304,7 @@ export default function RecruiterDashboard() {
         </motion.div>
 
         {/* Jobs & Candidates Section */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <motion.div id="candidates" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }} className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Job Selector */}
           <motion.div className="lg:col-span-1">
             <div className="sticky top-24 space-y-4">
@@ -443,6 +409,34 @@ export default function RecruiterDashboard() {
                       <option value="any" className="bg-slate-700">Any Skill</option>
                     </select>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-gray-300 font-medium">Test Difficulty:</label>
+                    <select
+                      value={testDifficultyFilter}
+                      onChange={(e) => setTestDifficultyFilter(e.target.value)}
+                      className="px-3 py-1.5 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm focus:border-purple-500 focus:outline-none"
+                    >
+                      <option value="all">All</option>
+                      <option value="beginner">Beginner</option>
+                      <option value="intermediate">Intermediate</option>
+                      <option value="advanced">Advanced</option>
+                      <option value="notested">No Test</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-gray-300 font-medium">Answered Level:</label>
+                    <select
+                      value={answerLevelFilter}
+                      onChange={(e) => setAnswerLevelFilter(e.target.value)}
+                      className="px-3 py-1.5 bg-slate-700/50 border border-purple-500/30 rounded-lg text-white text-sm focus:border-purple-500 focus:outline-none"
+                    >
+                      <option value="all">All</option>
+                      <option value="beginner">Has Beginner Answers</option>
+                      <option value="intermediate">Has Intermediate Answers</option>
+                      <option value="advanced">Has Advanced Answers</option>
+                      <option value="none">No Answers</option>
+                    </select>
+                  </div>
                   <motion.button
                     type="button"
                     onClick={() => setFilterSkills(jobRequiredSkills.map((s) => normalize(s)))}
@@ -503,7 +497,7 @@ export default function RecruiterDashboard() {
                 </motion.div>
               ) : (
                 (() => {
-                  const filtered = filterSkills.length === 0
+                  const bySkills = filterSkills.length === 0
                     ? candidates
                     : candidates.filter(({ candidate }) => {
                         const candidateSkillNames = Array.isArray(candidate.skills)
@@ -515,19 +509,45 @@ export default function RecruiterDashboard() {
                         return filterSkills.some((f) => candidateSkillNames.includes(f));
                       });
 
+                  const filtered = bySkills.filter((item) => {
+                    const latest = item.latestTest;
+
+                    // Test difficulty filter
+                    if (testDifficultyFilter && testDifficultyFilter !== 'all') {
+                      if (testDifficultyFilter === 'notested') {
+                        if (latest) return false;
+                      } else {
+                        if (!latest || (latest.difficulty || '').toLowerCase() !== testDifficultyFilter) return false;
+                      }
+                    }
+
+                    // Answer level filter (whether candidate has answered questions at that level)
+                    if (answerLevelFilter && answerLevelFilter !== 'all') {
+                      if (answerLevelFilter === 'none') {
+                        if (latest && (latest.totalQuestions || 0) > 0) return false;
+                      } else {
+                        // must have >0 answers at that difficulty
+                        if (!latest || !(latest.difficultyCounts && latest.difficultyCounts[answerLevelFilter] > 0)) return false;
+                      }
+                    }
+
+                    return true;
+                  });
+
                   return (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="text-left text-gray-300 border-b border-purple-500/30 pb-3">
                             <th className="pb-3 px-4 font-semibold">Candidate</th>
+                            <th className="pb-3 px-4 font-semibold text-center">Test</th>
                             <th className="pb-3 px-4 font-semibold text-center">Match Score</th>
                             <th className="pb-3 px-4 font-semibold text-center">Status</th>
                             <th className="pb-3 px-4 font-semibold text-right">Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-purple-500/20">
-                          {filtered.map(({ candidate, matchPercentage, shortlisted }, idx) => (
+                          {filtered.map(({ candidate, matchPercentage, shortlisted, latestTest }, idx) => (
                             <motion.tr
                               key={candidate._id}
                               initial={{ opacity: 0, x: -20 }}
@@ -541,6 +561,21 @@ export default function RecruiterDashboard() {
                                   <div className="font-semibold text-white">{candidate.name ?? '—'}</div>
                                   <div className="text-xs text-gray-400">{candidate.email}</div>
                                 </div>
+                              </td>
+                              <td className="py-4 px-4 text-center">
+                                {latestTest ? (
+                                  <div className="space-y-1">
+                                    <div className="font-bold text-white">{latestTest.score}%</div>
+                                    <div className="text-xs text-gray-300">{latestTest.correctAnswers}/{latestTest.totalQuestions} correct</div>
+                                    <div className="flex items-center justify-center gap-2 mt-2">
+                                      <span className="text-xs px-2 py-0.5 bg-green-600/20 text-green-300 rounded">B:{latestTest.difficultyCounts.beginner}</span>
+                                      <span className="text-xs px-2 py-0.5 bg-yellow-600/20 text-yellow-300 rounded">I:{latestTest.difficultyCounts.intermediate}</span>
+                                      <span className="text-xs px-2 py-0.5 bg-red-600/20 text-red-300 rounded">A:{latestTest.difficultyCounts.advanced}</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-gray-400">—</div>
+                                )}
                               </td>
                               <td className="py-4 px-4 text-center">
                                 <motion.div className="flex items-center justify-center">
@@ -594,6 +629,6 @@ export default function RecruiterDashboard() {
           </motion.div>
         </motion.div>
       </main>
-    </div>
+    </DashboardLayout>
   );
 }

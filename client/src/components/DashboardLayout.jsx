@@ -25,9 +25,6 @@ export function DashboardLayout({ children, role = 'candidate' }) {
     ],
     recruiter: [
       { label: 'Dashboard', icon: Home, path: '/recruiter' },
-      { label: 'Jobs', icon: Briefcase, path: '/recruiter' },
-      { label: 'Candidates', icon: Users, path: '/recruiter' },
-      { label: 'Analytics', icon: BarChart, path: '/recruiter' },
     ],
     admin: [
       { label: 'Dashboard', icon: Home, path: '/admin' },
@@ -38,6 +35,29 @@ export function DashboardLayout({ children, role = 'candidate' }) {
   };
 
   const items = menuItems[role] || menuItems.candidate;
+
+  // Render a minimal layout for recruiter: no sidebar, show heading and content
+  if (role === 'recruiter') {
+    return (
+      <div className="min-h-screen bg-slate-900 text-white">
+        <div className="bg-slate-800 border-b border-slate-700 px-6 py-4 flex items-center justify-between">
+          <Link to="/" className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">SkillBridge AI</Link>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <p className="text-sm font-medium">{user?.name}</p>
+              <p className="text-xs text-slate-400">{user?.role}</p>
+            </div>
+            <button onClick={handleLogout} className="px-3 py-1.5 bg-red-600/20 text-red-300 rounded">Logout</button>
+          </div>
+        </div>
+
+        <main className="max-w-7xl mx-auto p-6">
+          <h1 className="text-3xl font-bold mb-4">Recruiter Dashboard</h1>
+          <div>{children}</div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-slate-900 text-white">
@@ -58,21 +78,23 @@ export function DashboardLayout({ children, role = 'candidate' }) {
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto p-4">
-          {items.map((item) => (
-            <Link
-              key={item.path}
-              to={item.path}
-              onClick={() => setSidebarOpen(false)}
-              className={`flex items-center gap-3 px-4 py-3 rounded-lg mb-2 transition ${
-                location.pathname === item.path
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              <item.icon className="w-5 h-5" />
-              <span>{item.label}</span>
-            </Link>
-          ))}
+          {items.map((item) => {
+            const toPath = item.hash ? `${item.path}#${item.hash}` : item.path;
+            const isActive = location.pathname === item.path && (item.hash ? location.hash === `#${item.hash}` : true);
+            return (
+              <Link
+                key={toPath}
+                to={toPath}
+                onClick={() => setSidebarOpen(false)}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg mb-2 transition ${
+                  isActive ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                <item.icon className="w-5 h-5" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
         </nav>
 
         {/* User Profile */}

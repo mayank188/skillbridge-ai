@@ -163,6 +163,7 @@ async function getJobListings(req, res, next) {
         _id: job._id,
         title: job.title,
         description: job.description,
+        company: job.company || (job.recruiterId && job.recruiterId.name) || '',
         requiredSkills: job.requiredSkills,
         minimumScore: job.minimumScore,
         location: job.location,
