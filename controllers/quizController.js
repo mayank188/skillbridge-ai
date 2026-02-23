@@ -159,6 +159,43 @@ async function submitQuiz(req, res, next) {
   }
 }
 
+// Receive proctoring snapshots from client. By design we do not persist images;
+// this endpoint only accepts a base64 image and returns acknowledgement.
+async function proctorSnapshot(req, res, next) {
+  try {
+    const { image, sessionId, timestamp } = req.body || {};
+    if (!image || typeof image !== 'string') {
+      return res.status(400).json({ error: 'Invalid snapshot payload' });
+    }
+
+    // Validate prefix (data URL) and reasonable size
+    const allowedPrefixes = ['data:image/jpeg;base64,', 'data:image/png;base64,'];
+    const prefix = allowedPrefixes.find((p) => image.startsWith(p));
+    if (!prefix) {
+      return res.status(400).json({ error: 'Unsupported image format' });
+    }
+
+    const sizeChars = image.length;
+    const maxChars = 500 * 1024; // ~500 KB in chars
+    if (sizeChars > maxChars) {
+      return res.status(413).json({ error: 'Snapshot too large' });
+    }
+
+    // Minimal logging; do NOT persist the image per configuration.
+    console.log('[proctorSnapshot] recv', {
+      sessionId: sessionId || 'unknown',
+      timestamp: timestamp || Date.now(),
+      sizeChars,
+    });
+
+    // Optionally perform light processing here (face-detection checks, etc.)
+
+    return res.json({ received: true });
+  } catch (err) {
+    next(err);
+  }
+}
+
 // Get test history for candidate
 async function getTestHistory(req, res, next) {
   try {
@@ -185,4 +222,4 @@ async function getTestResult(req, res, next) {
   }
 }
 
-module.exports = { generateQuiz, submitQuiz, getTestHistory, getTestResult };
+module.exports = { generateQuiz, submitQuiz, proctorSnapshot, getTestHistory, getTestResult };

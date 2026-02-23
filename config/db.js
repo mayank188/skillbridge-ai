@@ -11,6 +11,11 @@ async function connectDB() {
     console.error(
       'MONGODB_URI is not defined. Add it to your .env file (e.g. MONGODB_URI=mongodb://localhost:27017/your-db).'
     );
+    // In development allow server to run without a DB for local testing
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('Running without MongoDB in development. Some features may be disabled.');
+      return;
+    }
     process.exit(1);
   }
 
@@ -25,6 +30,10 @@ async function connectDB() {
   } catch (err) {
     console.error('MongoDB connection failed:', err.message || err);
     // In production, fail fast so the process manager can restart the service.
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('Continuing without a DB in development mode.');
+      return;
+    }
     process.exit(1);
   }
 
