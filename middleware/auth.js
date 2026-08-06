@@ -1,7 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-
-const JWT_SECRET = process.env.JWT_SECRET;
+const { getJwtSecret } = require('../utils/jwt');
 
 /**
  * Verify JWT and attach user to request.
@@ -18,15 +17,9 @@ async function authenticate(req, res, next) {
     }
 
     const token = authHeader.slice(7);
-    if (!JWT_SECRET) {
-      const err = new Error('Server configuration error.');
-      err.statusCode = 500;
-      return next(err);
-    }
-
     let decoded;
     try {
-      decoded = jwt.verify(token, JWT_SECRET);
+      decoded = jwt.verify(token, getJwtSecret());
     } catch (e) {
       const msg = e.name === 'TokenExpiredError' ? 'Token expired.' : 'Invalid token.';
       const err = new Error(msg);

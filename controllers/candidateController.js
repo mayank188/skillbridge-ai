@@ -287,13 +287,13 @@ module.exports = {
       next(err);
     }
   },
-  // debug: return recent applications for this candidate (helpful to inspect statuses)
+// debug: return recent applications for this candidate (helpful to inspect statuses)
   getRecentApplications: async function (req, res, next) {
     try {
       const apps = await Application.find({ candidateId: req.user._id })
         .sort({ createdAt: -1 })
         .limit(50)
-        .populate('jobId', 'title');
+        .populate('jobId', 'title company');
       res.json(apps);
     } catch (err) {
       next(err);

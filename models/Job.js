@@ -60,6 +60,11 @@ const jobSchema = new mongoose.Schema(
         message: 'Job type must be full-time, part-time, contract, internship, or freelance',
       },
     },
+    status: {
+      type: String,
+      enum: ['active', 'suspended', 'pending'],
+      default: 'active',
+    },
     createdAt: {
       type: Date,
       default: Date.now,

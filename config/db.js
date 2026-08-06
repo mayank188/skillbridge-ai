@@ -1,22 +1,35 @@
 const mongoose = require('mongoose');
+const { MongoMemoryServer } = require('mongodb-memory-server');
+
+/**
+ * Start an in-memory MongoDB instance for local development.
+ */
+async function startMemoryServer() {
+  const mongod = await MongoMemoryServer.create();
+  const uri = mongod.getUri();
+  console.warn('Using in-memory MongoDB for development:', uri);
+  return { mongod, uri };
+}
 
 /**
  * Connect to MongoDB using Mongoose.
  * Uses process.env.MONGODB_URI (loaded by dotenv at top of server.js).
  */
 async function connectDB() {
-  const uri = process.env.MONGODB_URI;
+  let uri = process.env.MONGODB_URI;
+  let memoryServer = null;
 
   if (!uri || typeof uri !== 'string' || !uri.trim()) {
     console.error(
-      'MONGODB_URI is not defined. Add it to your .env file (e.g. MONGODB_URI=mongodb://localhost:27017/your-db).'
+      'MONGODB_URI is not defined. Defaulting to in-memory MongoDB for local development.'
     );
-    // In development allow server to run without a DB for local testing
-    if (process.env.NODE_ENV === 'development') {
-      console.warn('Running without MongoDB in development. Some features may be disabled.');
-      return;
+    if (process.env.NODE_ENV !== 'production') {
+      const memory = await startMemoryServer();
+      uri = memory.uri;
+      memoryServer = memory.mongod;
+    } else {
+      process.exit(1);
     }
-    process.exit(1);
   }
 
   const options = {
@@ -29,12 +42,18 @@ async function connectDB() {
     console.log('MongoDB connected successfully.');
   } catch (err) {
     console.error('MongoDB connection failed:', err.message || err);
-    // In production, fail fast so the process manager can restart the service.
-    if (process.env.NODE_ENV === 'development') {
-      console.warn('Continuing without a DB in development mode.');
-      return;
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('Falling back to in-memory MongoDB for local development.');
+      if (!memoryServer) {
+        const memory = await startMemoryServer();
+        uri = memory.uri;
+        memoryServer = memory.mongod;
+      }
+      await mongoose.connect(uri.trim(), options);
+      console.log('Connected to in-memory MongoDB.');
+    } else {
+      process.exit(1);
     }
-    process.exit(1);
   }
 
   mongoose.connection.on('error', (err) => {
@@ -44,6 +63,8 @@ async function connectDB() {
   mongoose.connection.on('disconnected', () => {
     console.warn('MongoDB disconnected.');
   });
+
+  return mongoose.connection.readyState === 1;
 }
 
 module.exports = { connectDB };

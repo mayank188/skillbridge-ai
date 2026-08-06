@@ -29,20 +29,7 @@ async function uploadResumeHandler(req, res, next) {
     }
 
     // Flatten skills into array of { name, category, confidence }
-    const skillsArray = [];
-    Object.keys(skillsObj || {}).forEach((category) => {
-      const list = skillsObj[category] || [];
-      if (Array.isArray(list)) {
-        list.forEach((s) => {
-          if (!s) return;
-          if (typeof s === 'string') {
-            skillsArray.push({ name: s, category: category, confidence: s.confidence ?? 80 });
-          } else if (s.name) {
-            skillsArray.push({ name: s.name, category: category, confidence: s.confidence ?? 80 });
-          }
-        });
-      }
-    });
+    const skillsArray = flattenSkills(skillsObj);
 
     // If Authorization header present, try to update the user's skills (persist)
     try {
@@ -104,6 +91,42 @@ async function saveSkillsHandler(req, res, next) {
   } catch (err) {
     next(err);
   }
+}
+
+function flattenSkills(skillsObj) {
+  const result = [];
+  if (!skillsObj) return result;
+
+  if (Array.isArray(skillsObj)) {
+    skillsObj.forEach((skill) => {
+      if (!skill) return;
+      if (typeof skill === 'string') {
+        result.push({ name: skill, category: 'tools', confidence: 80 });
+      } else if (skill.name) {
+        result.push({ name: skill.name, category: skill.category || 'tools', confidence: Number(skill.confidence ?? 80) });
+      }
+    });
+    return result;
+  }
+
+  if (typeof skillsObj === 'object') {
+    Object.entries(skillsObj).forEach(([category, list]) => {
+      if (Array.isArray(list)) {
+        list.forEach((item) => {
+          if (!item) return;
+          if (typeof item === 'string') {
+            result.push({ name: item, category, confidence: 80 });
+          } else if (item.name) {
+            result.push({ name: item.name, category, confidence: Number(item.confidence ?? 80) });
+          }
+        });
+      } else if (typeof list === 'string') {
+        result.push({ name: list, category, confidence: 80 });
+      }
+    });
+  }
+
+  return result;
 }
 
 module.exports = { uploadResumeHandler, saveSkillsHandler };

@@ -40,13 +40,13 @@ async function generateProject(skills, difficulty = 'intermediate') {
   const normalizedLevel = VALID_DIFFICULTIES.includes(level) ? level : 'intermediate';
 
   const [skill1, skill2] = getTopTwoSkillNames(skills);
-  const skillLabel = skill1 === skill2 ? skill1 : `${skill1} and ${skill2}`;
 
   if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is not set.');
+    return localGenerateProject([skill1, skill2].filter(Boolean), normalizedLevel);
   }
 
-  const prompt = `Generate a real-world mini project for a developer skilled in ${skill1} and ${skill2}.
+  try {
+    const prompt = `Generate a real-world mini project for a developer skilled in ${skill1} and ${skill2}.
 
 Difficulty level: ${normalizedLevel}
 
@@ -62,21 +62,87 @@ Return a valid JSON object only, with no other text. Use this exact structure:
 - deliverables: array of 3-5 concrete outcomes (e.g. "REST API with GET/POST endpoints", "README with setup instructions")
 Match scope and complexity to ${normalizedLevel} level.`;
 
-  const response = await openai.chat.completions.create({
-    model: process.env.OPENAI_PROJECT_MODEL ?? 'gpt-4o-mini',
-    messages: [
-      { role: 'system', content: 'You output only valid JSON objects. No markdown, no explanation.' },
-      { role: 'user', content: prompt },
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_PROJECT_MODEL ?? 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: 'You output only valid JSON objects. No markdown, no explanation.' },
+        { role: 'user', content: prompt },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.7,
+    });
+
+    const content = response.choices?.[0]?.message?.content?.trim();
+    if (!content) throw new Error('No content in OpenAI response for project generation.');
+
+    return parseProjectResponse(content, skill1, skill2, normalizedLevel);
+  } catch (err) {
+    console.warn('Project generation with OpenAI failed, using local fallback:', err?.message || err);
+    return localGenerateProject([skill1, skill2].filter(Boolean), normalizedLevel);
+  }
+}
+
+/**
+ * Local fallback project generation when OpenAI is unavailable.
+ */
+function localGenerateProject(skills, difficulty) {
+  const skillLabel = skills.length > 1 ? `${skills[0]} and ${skills[1]}` : skills[0] || 'Software development';
+  const title = `${difficulty.charAt(0).toUpperCase() + difficulty.slice(1)} ${skillLabel} project`;
+
+  const description = `Build a ${difficulty} project using ${skillLabel} that demonstrates key skills, practical implementation, and clear documentation.`;
+
+  const requirementTemplate = {
+    beginner: [
+      `Create a simple ${skillLabel} app with a clean user interface`,
+      `Implement at least one form or input flow`,
+      `Use a local data store or JSON file for persistence`,
+      `Write a short README with setup instructions`,
     ],
-    response_format: { type: 'json_object' },
-    temperature: 0.7,
-  });
+    intermediate: [
+      `Build a ${skillLabel} application with multiple connected screens or routes`,
+      `Implement reusable components or modules`,
+      `Connect to a backend or simulated API for data exchange`,
+      `Include validation, error handling, and user feedback`,
+      `Document installation and usage in a README`,
+    ],
+    advanced: [
+      `Design and implement a scalable ${skillLabel} solution`,
+      `Use authentication or secure data handling where appropriate`,
+      `Integrate a database or third-party service`,
+      `Add automated testing or validation for key workflows`,
+      `Provide deployment instructions and architecture notes`,
+    ],
+  };
 
-  const content = response.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error('No content in OpenAI response for project generation.');
+  const deliverablesTemplate = {
+    beginner: [
+      `${title} source code`,
+      'A working demo with basic UI',
+      'README file with setup steps',
+    ],
+    intermediate: [
+      `${title} source code`,
+      'A functional app with multiple pages/features',
+      'API or data integration layer',
+      'README with architecture and usage',
+    ],
+    advanced: [
+      `${title} source code`,
+      'A scalable application architecture',
+      'Testing or quality checks',
+      'Deployment/readme documentation',
+      'A short demo or presentation summary',
+    ],
+  };
 
-  const parsed = parseProjectResponse(content, skill1, skill2, normalizedLevel);
-  return parsed;
+  return {
+    title: title.replace(/([a-z])/g, (m) => m.toUpperCase()),
+    description,
+    requirements: requirementTemplate[difficulty] || requirementTemplate.intermediate,
+    deliverables: deliverablesTemplate[difficulty] || deliverablesTemplate.intermediate,
+    difficulty,
+    skills,
+  };
 }
 
 /**

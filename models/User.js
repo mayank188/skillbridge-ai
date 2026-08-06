@@ -79,6 +79,53 @@ const userSchema = new mongoose.Schema(
       min: [0, 'Project score cannot be negative'],
       max: [100, 'Project score cannot exceed 100'],
     },
+    avatar: {
+      type: String,
+      default: '',
+    },
+    phone: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    headline: {
+      type: String,
+      trim: true,
+      maxlength: [200, 'Headline cannot exceed 200 characters'],
+      default: '',
+    },
+    bio: {
+      type: String,
+      trim: true,
+      maxlength: [1000, 'Bio cannot exceed 1000 characters'],
+      default: '',
+    },
+    location: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    status: {
+      type: String,
+      enum: ['active', 'suspended', 'banned'],
+      default: 'active',
+    },
+    banReason: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    warnings: [
+      {
+        message: String,
+        notes: String,
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
     createdAt: {
       type: Date,
       default: Date.now,
@@ -95,6 +142,9 @@ const userSchema = new mongoose.Schema(
 
 // unique: true on email already creates a unique index; avoid duplicate
 userSchema.index({ role: 1 });
+userSchema.index({ status: 1 });
+userSchema.index({ name: 1 });
+userSchema.index({ createdAt: -1 });
 
 const User = mongoose.model('User', userSchema);
 

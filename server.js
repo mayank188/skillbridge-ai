@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const mongoose = require('mongoose');
 const { connectDB } = require('./config/db');
 const authRoutes = require('./routes/auth');
 const candidateRoutes = require('./routes/candidate');
@@ -26,14 +27,27 @@ const generalLimiter = rateLimit({
 app.use(generalLimiter);
 
 // --- Core Middleware ---
+const corsOrigin = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  : ['http://localhost:5175', 'http://localhost:5174', 'http://localhost:5173'];
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN?.split(',').map((o) => o.trim()) ?? '*',
+  origin: corsOrigin,
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // --- Routes ---
+app.use('/api', (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      error: 'Database unavailable. Please check the MongoDB connection and restart the backend.',
+    });
+  }
+  next();
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/candidate', candidateRoutes);
 app.use('/api/quiz', quizRoutes);
@@ -74,10 +88,19 @@ app.use((err, req, res, next) => {
 // --- Start server (async) ---
 async function start() {
   try {
-    await connectDB();
-    app.locals.dbConnected = true;
-    app.listen(PORT, () => {
+    const isConnected = await connectDB();
+    app.locals.dbConnected = isConnected === true;
+
+    const server = app.listen(PORT, () => {
       console.log(`Server listening on port ${PORT}`);
+    });
+
+    server.on('error', (err) => {
+      console.error('Server failed to start:', err.message || err);
+      if (err.code === 'EADDRINUSE') {
+        console.error(`Port ${PORT} is already in use. Stop the existing process or set a different PORT.`);
+      }
+      process.exit(1);
     });
   } catch (err) {
     console.error('Failed to start server:', err);

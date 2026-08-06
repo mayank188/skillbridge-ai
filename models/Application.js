@@ -17,12 +17,8 @@ const applicationSchema = new mongoose.Schema(
       enum: ['pending', 'shortlisted', 'accepted', 'rejected'],
       default: 'pending',
     },
-    createdAt: {
-      type: Date,
-      default: Date.now,
-    },
   },
-  { timestamps: false, versionKey: false }
+  { timestamps: true, versionKey: false }
 );
 
 applicationSchema.index({ jobId: 1, candidateId: 1 }, { unique: true });

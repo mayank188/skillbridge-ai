@@ -14,8 +14,9 @@ try {
  */
 async function extractSkillsFromResume(resumeText) {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OpenAI API key not configured on server');
+    if (!process.env.OPENAI_API_KEY || !client) {
+      console.warn('OpenAI API key not configured or client unavailable - using fallback skill extraction');
+      return extractSkillsFallback(resumeText);
     }
     // Try multiple times in case of transient AI errors
     let attempts = 0;
@@ -62,9 +63,116 @@ Return a JSON object with categories: frontend, backend, database, devops, tools
     fallback.tools = unique.filter((u) => known.includes(u)).slice(0, 20).map((n) => ({ name: n, confidence: 60 }));
     return fallback;
   } catch (err) {
-    console.error('AI skill extraction error:', err.message);
-    throw new Error('Failed to extract skills from resume');
+    console.error('AI skill extraction error:', err.message || err);
+    return extractSkillsFallback(resumeText);
   }
+}
+
+// Shared broad skill dictionary: category -> array of skill names (lowercase).
+// Used by the fallback extractor so common technologies are detected even without OpenAI.
+const SKILL_DICTIONARY = {
+  frontend: [
+    'javascript', 'typescript', 'react', 'react native', 'vue', 'vuejs', 'angular', 'svelte',
+    'nextjs', 'next.js', 'nuxt', 'html', 'html5', 'css', 'css3', 'scss', 'sass', 'less',
+    'tailwind', 'tailwind css', 'tailwindcss', 'bootstrap', 'material ui', 'chakra ui',
+    'styled-components', 'redux', 'redux toolkit', 'webpack', 'vite', 'babel', 'jquery',
+    'graphql', 'apollo', 'pwa', 'progressive web app', 'web components', 'd3.js', 'd3',
+    'three.js', 'threejs', 'chart.js', 'figma', 'responsive design', 'responsive web design',
+  ],
+  backend: [
+    'node', 'node.js', 'nodejs', 'express', 'express.js', 'nest', 'nestjs', 'koa', 'fastify',
+    'python', 'django', 'flask', 'fastapi', 'java', 'spring', 'spring boot', 'hibernate',
+    'c', 'c++', 'cpp', 'c#', 'csharp', '.net', 'asp.net', 'php', 'laravel', 'symfony', 'codeigniter',
+    'ruby', 'rails', 'ruby on rails', 'go', 'golang', 'rust', 'kotlin', 'scala', 'swift',
+    'graphql', 'rest', 'rest api', 'restful', 'microservices', 'grpc', 'serverless',
+    'websocket', 'websockets', 'oauth', 'jwt', 'authentication', 'authorization', 'api',
+  ],
+  database: [
+    'sql', 'mysql', 'postgresql', 'postgres', 'mongodb', 'mongo', 'redis', 'sqlite',
+    'oracle', 'sql server', 'mssql', 'mariadb', 'dynamodb', 'cassandra', 'elasticsearch',
+    'firebase', 'firestore', 'neo4j', 'prisma', 'sequelize', 'typeorm', 'mongoose',
+    'database design', 'database management', 'nosql', 'sqlalchemy',
+  ],
+  devops: [
+    'aws', 'amazon web services', 'azure', 'gcp', 'google cloud', 'google cloud platform',
+    'docker', 'kubernetes', 'k8s', 'terraform', 'ansible', 'jenkins', 'github actions',
+    'gitlab ci', 'ci/cd', 'continuous integration', 'continuous deployment', 'devops',
+    'linux', 'ubuntu', 'bash', 'shell', 'powershell', 'nginx', 'apache', 'prometheus',
+    'grafana', 'monitoring', 'logging', 'cloud', 'cloud computing', 'vpc', 'ec2', 's3',
+    'lambda', 'serverless', 'iaas', 'paas', 'saas',
+  ],
+  tools: [
+    'git', 'github', 'gitlab', 'bitbucket', 'jira', 'confluence', 'slack', 'trello',
+    'postman', 'swagger', 'vscode', 'visual studio code', 'intellij', 'eclipse', 'webstorm',
+    'figma', 'jupyter', 'jupyter notebook', 'excel', 'agile', 'scrum', 'kanban', 'testing',
+    'unit testing', 'jest', 'mocha', 'cypress', 'selenium', 'playwright', 'pytest', 'tensorflow',
+    'pytorch', 'keras', 'scikit-learn', 'pandas', 'numpy', 'machine learning', 'data science',
+    'deep learning', 'nlp', 'natural language processing', 'computer vision', 'docker-compose',
+  ],
+};
+
+// Flatten all skill names into a single lowercase set for fast lookup.
+const SKILL_NAME_SET = new Set();
+const SKILL_TO_CATEGORY = {};
+Object.entries(SKILL_DICTIONARY).forEach(([category, names]) => {
+  names.forEach((name) => {
+    const key = name.toLowerCase();
+    SKILL_NAME_SET.add(key);
+    SKILL_TO_CATEGORY[key] = category;
+  });
+});
+
+/**
+ * Detect skills from raw resume text using the offline dictionary.
+ * Returns { category: [ { name, confidence } ] }.
+ */
+function extractSkillsFallback(resumeText) {
+  const fallback = { tools: [] };
+  if (!resumeText || typeof resumeText !== 'string') return fallback;
+
+  const normalizedText = resumeText
+    .replace(/\s+/g, ' ')
+    .replace(/[“”]/g, '"')
+    .trim();
+
+  const lower = normalizedText.toLowerCase();
+  const found = [];
+
+  // First pass: match multi-word skills (longest first to avoid partial matches).
+  const multiWord = Object.keys(SKILL_NAME_SET).filter((k) => k.includes(' ')).sort((a, b) => b.length - a.length);
+  for (const skill of multiWord) {
+    if (lower.includes(skill)) {
+      found.push(skill);
+    }
+  }
+
+  // Second pass: match single-word skills (word-boundary aware).
+  const singleWord = Object.keys(SKILL_NAME_SET).filter((k) => !k.includes(' '));
+  for (const skill of singleWord) {
+    const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(^|[^a-z0-9+#.])${escaped}([^a-z0-9+#.##]|$)`, 'i');
+    if (re.test(lower)) {
+      found.push(skill);
+    }
+  }
+
+  // Deduplicate and group by category.
+  const unique = [];
+  const seen = new Set();
+  found.forEach((skill) => {
+    if (seen.has(skill)) return;
+    seen.add(skill);
+    const category = SKILL_TO_CATEGORY[skill] || 'tools';
+    if (!fallback[category]) fallback[category] = [];
+    fallback[category].push({ name: skill, confidence: 60 });
+  });
+
+  // Remove empty category arrays.
+  Object.keys(fallback).forEach((cat) => {
+    if (Array.isArray(fallback[cat]) && fallback[cat].length === 0) delete fallback[cat];
+  });
+
+  return fallback;
 }
 
 /**
@@ -121,8 +229,11 @@ async function generateQuizQuestions(skills, _difficulty = 'intermediate', numQu
           ],
           temperature: 0.2,
         });
-        // Normalize returned items and push
-        for (const item of chunk) {
+// Parse returned JSON array from the AI response and normalize items
+        const responseContent = response.choices?.[0]?.message?.content || '[]';
+        const responseJsonMatch = responseContent.match(/\[[\s\S]*\]/);
+        const parsedItems = responseJsonMatch ? JSON.parse(responseJsonMatch[0]) : [];
+        for (const item of parsedItems) {
           const correctAnswer = item.correctAnswer || item.options?.[0] || 'Option A';
           questions.push({
             question: item.question || item.prompt || 'Sample question',
@@ -489,14 +600,21 @@ function localGenerateQuestions(skillObjs, numQuestions = 10, resumeText = null)
 }
 
 /**
- * Generate a mini project based on skills and level
+ * Generate a mini project based on skills and level.
+ * Uses OpenAI if available, otherwise falls back to a local template generator.
  */
 async function generateProject(skills, difficulty = 'intermediate') {
-  try {
-    const skillNames = Array.isArray(skills)
-      ? skills.map((s) => (s.name ? s.name : s)).join(', ')
-      : skills.join(', ');
+  const skillNames = Array.isArray(skills)
+    ? skills.map((s) => (s.name ? s.name : s)).join(', ')
+    : skills.join(', ');
 
+  // If OpenAI is not configured, generate locally so the flow always works.
+  if (!client || !process.env.OPENAI_API_KEY) {
+    console.warn('OpenAI not configured for project generation — using local fallback');
+    return generateProjectFallback(skills, difficulty);
+  }
+
+  try {
     const response = await client.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [
@@ -517,18 +635,64 @@ async function generateProject(skills, difficulty = 'intermediate') {
     const content = response.choices[0]?.message?.content || '{}';
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     const project = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
-
-    return project;
+    if (project && project.title) return project;
+    return generateProjectFallback(skills, difficulty);
   } catch (err) {
     console.error('AI project generation error:', err.message);
-    throw new Error('Failed to generate project');
+    return generateProjectFallback(skills, difficulty);
   }
 }
 
 /**
- * Evaluate project submission using AI
+ * Local fallback project generator — builds a project from the candidate's skills
+ * without requiring an OpenAI API key.
+ */
+function generateProjectFallback(skills, difficulty = 'intermediate') {
+  const list = Array.isArray(skills) ? skills : [];
+  const names = list
+    .map((s) => (typeof s === 'string' ? s : s?.name || String(s)))
+    .filter(Boolean);
+  const top = names.slice(0, 2);
+  const primary = top[0] || 'Programming';
+  const secondary = top[1] || 'Problem Solving';
+
+  const title = `${primary} ${secondary} Project`;
+  const requirements = [
+    `Build a working application using ${primary}`,
+    `Implement core functionality with clean, well-structured ${primary} code`,
+    `Use ${secondary} techniques to solve the core problem`,
+    'Add basic error handling and validation',
+    'Include a README with setup and run instructions',
+  ];
+  const deliverables = [
+    `Functional ${primary} application`,
+    'Source code pushed to a Git repository',
+    'README with setup instructions',
+    'Screenshots or demo of the working app',
+  ];
+
+  return {
+    title,
+    description: `A ${difficulty} level project to demonstrate your ${primary} and ${secondary} skills. Build a complete application from scratch, apply best practices, and share your source code.`,
+    requirements,
+    deliverables,
+    difficulty,
+    skills: names.slice(0, 5),
+    estimatedHours: difficulty === 'advanced' ? 12 : difficulty === 'intermediate' ? 8 : 5,
+  };
+}
+
+/**
+ * Evaluate project submission using AI.
+ * Uses OpenAI if available, otherwise falls back to a local heuristic evaluator.
  */
 async function evaluateProject(projectDescription, githubLink, submittedCode) {
+  // If OpenAI not configured, use local heuristic evaluation.
+  if (!client || !process.env.OPENAI_API_KEY) {
+    console.warn('OpenAI not configured for project evaluation — using local fallback');
+    return evaluateProjectFallback(projectDescription, githubLink, submittedCode);
+  }
+
   try {
     const response = await client.chat.completions.create({
       model: 'gpt-3.5-turbo',
@@ -558,11 +722,244 @@ async function evaluateProject(projectDescription, githubLink, submittedCode) {
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     const evaluation = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
 
-    return evaluation;
+    if (evaluation && typeof evaluation.overallScore === 'number') return evaluation;
+    return evaluateProjectFallback(projectDescription, githubLink, submittedCode);
   } catch (err) {
     console.error('AI evaluation error:', err.message);
-    throw new Error('Failed to evaluate project');
+    return evaluateProjectFallback(projectDescription, githubLink, submittedCode);
   }
+}
+
+/**
+ * Analyze a GitHub repository's code structure and quality, returning detailed scores.
+ * Uses OpenAI if available, otherwise falls back to a local heuristic analyzer.
+ *
+ * @param {object} repoAnalysis - Output from githubService.analyzeGithubRepo()
+ * @param {string} projectDescription - Optional project description
+ * @returns {Promise<{
+ *   codeQualityScore, architectureScore, documentationScore, bestPracticesScore,
+ *   overallScore, feedback, strengths, improvements, structureSummary, source
+ * }>}
+ */
+async function analyzeGithubRepo(repoAnalysis, projectDescription = '') {
+  const structure = repoAnalysis?.structure;
+  const code = String(repoAnalysis?.code || '');
+  const repoName = repoAnalysis?.repoName || 'repository';
+  const fileCount = structure?.fileCount || 0;
+  const languages = Array.isArray(structure?.languages) ? structure.languages : [];
+  const langSummary = languages.map((l) => `${l.name}(${l.count})`).join(', ') || 'Not detected';
+
+  if (!client || !process.env.OPENAI_API_KEY) {
+    console.warn('OpenAI not configured for GitHub analysis — using local fallback');
+    return analyzeGithubRepoFallback(repoAnalysis, projectDescription);
+  }
+
+  try {
+    const response = await client.chat.completions.create({
+      model: process.env.OPENAI_SKILL_MODEL ?? 'gpt-3.5-turbo',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert senior code reviewer. Analyze the given GitHub repository and return a JSON object ONLY (no markdown, no extra text) with exactly this structure:
+{
+  "codeQualityScore": 0-100,
+  "architectureScore": 0-100,
+  "documentationScore": 0-100,
+  "bestPracticesScore": 0-100,
+  "overallScore": 0-100,
+  "feedback": "2-4 sentence summary of the code quality",
+  "strengths": ["Strength 1", "Strength 2", "..."],
+  "improvements": ["Improvement 1", "Improvement 2", "..."]
+}`,
+        },
+        {
+          role: 'user',
+          content: `Analyze this GitHub repository for code structure and quality.
+
+Repository: ${repoName}
+File count: ${fileCount}
+Languages detected: ${langSummary}
+Directories: ${(structure?.directories || []).join(', ')}
+Project description (if any): ${projectDescription}
+
+Code sample:
+${code.slice(0, 20000)}`,
+        },
+      ],
+      temperature: 0.3,
+    });
+
+    const content = response.choices?.[0]?.message?.content || '{}';
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    const evaluation = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+
+    if (evaluation && typeof evaluation.overallScore === 'number') {
+      return {
+        codeQualityScore: clampScore(evaluation.codeQualityScore),
+        architectureScore: clampScore(evaluation.architectureScore),
+        documentationScore: clampScore(evaluation.documentationScore),
+        bestPracticesScore: clampScore(evaluation.bestPracticesScore),
+        overallScore: clampScore(evaluation.overallScore),
+        feedback: String(evaluation.feedback || ''),
+        strengths: Array.isArray(evaluation.strengths) ? evaluation.strengths : [],
+        improvements: Array.isArray(evaluation.improvements) ? evaluation.improvements : [],
+        structureSummary: {
+          fileCount,
+          languages,
+          directories: structure?.directories || [],
+        },
+        source: 'ai',
+      };
+    }
+    return analyzeGithubRepoFallback(repoAnalysis, projectDescription);
+  } catch (err) {
+    console.error('AI GitHub analysis error:', err?.message || err);
+    return analyzeGithubRepoFallback(repoAnalysis, projectDescription);
+  }
+}
+
+/**
+ * Clamp a score to 0-100 range.
+ */
+function clampScore(val) {
+  const n = Number(val);
+  if (Number.isNaN(n)) return 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+/**
+ * Local heuristic GitHub repo analyzer — computes scores from repo structure
+ * and code without requiring an OpenAI API key.
+ */
+function analyzeGithubRepoFallback(repoAnalysis, projectDescription = '') {
+  const structure = repoAnalysis?.structure;
+  const code = String(repoAnalysis?.code || '');
+  const desc = String(projectDescription || '');
+
+  const fileCount = structure?.fileCount || 0;
+  const languages = Array.isArray(structure?.languages) ? structure.languages : [];
+  const directories = Array.isArray(structure?.directories) ? structure.directories : [];
+
+  // Heuristics
+  const hasReadme = code.includes('README') || /README/i.test(code);
+  const hasFunctions = /function\s+\w+|=>\s*\{|def\s+\w+|public\s+\w+\s+\w+\s*\(/.test(code);
+  const hasImports = /import\s|require\(|from\s|import\s\w+/.test(code);
+  const hasStructure = /class\s+\w+|const\s+\w+\s*=|let\s+\w+\s*=|function\s+\w+/.test(code);
+  const hasComments = /\/\/|\/\*|\*|#/.test(code);
+  const hasConfig = /package\.json|requirements\.txt|dockerfile|\.env\.example|tsconfig|vite\.config|webpack/.test(code);
+  const hasTests = /test|describe\(|it\(|jest|pytest|unittest/.test(code);
+  const organized = directories.length >= 2;
+  const usesMultipleLanguages = languages.length >= 2;
+
+  let codeQuality = 40;
+  let architecture = 40;
+  let documentation = 40;
+  let bestPractices = 40;
+
+  if (fileCount > 3) codeQuality += 15;
+  if (hasFunctions) codeQuality += 15;
+  if (hasStructure) codeQuality += 15;
+  if (hasComments) codeQuality += 10;
+
+  if (organized) architecture += 20;
+  if (usesMultipleLanguages) architecture += 10;
+  if (hasImports) architecture += 15;
+  if (fileCount > 5) architecture += 10;
+
+  if (hasReadme) documentation += 30;
+  if (desc.trim().length > 10) documentation += 20;
+  if (hasComments) documentation += 15;
+
+  if (hasConfig) bestPractices += 20;
+  if (hasTests) bestPractices += 20;
+  if (organized) bestPractices += 15;
+  if (hasImports) bestPractices += 10;
+
+  codeQuality = Math.min(100, codeQuality + (fileCount > 0 ? 5 : 0));
+  architecture = Math.min(100, architecture);
+  documentation = Math.min(100, documentation);
+  bestPractices = Math.min(100, bestPractices);
+
+  const overallScore = Math.round(
+    (codeQuality + architecture + documentation + bestPractices) / 4
+  );
+
+  const strengths = [];
+  const improvements = [];
+
+  if (hasReadme) strengths.push('Repository includes a README with documentation.');
+  if (hasFunctions) strengths.push('Code contains well-defined functions and logic.');
+  if (organized) strengths.push('Code is organized into multiple directories.');
+  if (hasTests) strengths.push('Includes automated tests.');
+  if (usesMultipleLanguages) strengths.push('Uses multiple technologies/languages.');
+
+  if (!hasReadme) improvements.push('Add a README with setup and usage instructions.');
+  if (!hasTests) improvements.push('Add automated tests to improve reliability.');
+  if (!hasComments) improvements.push('Add comments to explain complex logic.');
+  if (!hasConfig) improvements.push('Add configuration files (e.g., package.json, dockerfile).');
+  if (fileCount === 0) improvements.push('No source code files were found in the repository.');
+
+  return {
+    codeQualityScore: codeQuality,
+    architectureScore: architecture,
+    documentationScore: documentation,
+    bestPracticesScore: bestPractices,
+    overallScore,
+    feedback: `Repository analyzed locally. ${strengths.length ? 'Strengths: ' + strengths.join(' ') : 'Structure detected.'} ${improvements.length ? 'Suggested improvements: ' + improvements.join(' ') : ''}`,
+    strengths,
+    improvements,
+    structureSummary: {
+      fileCount,
+      languages,
+      directories,
+    },
+    source: 'fallback',
+  };
+}
+
+/**
+ * Local heuristic project evaluator — computes scores from the submitted code
+ * without requiring an OpenAI API key.
+ */
+function evaluateProjectFallback(projectDescription, githubLink, submittedCode) {
+  const code = String(submittedCode || '');
+  const desc = String(projectDescription || '');
+  const link = String(githubLink || '');
+
+  // Heuristic: code length, presence of functions, comments, structure.
+  const lines = code.split('\n').filter((l) => l.trim().length > 0).length;
+  const hasFunctions = /function\s+\w+|=>\s*\{|def\s+\w+|public\s+\w+\s+\w+\s*\(/.test(code);
+  const hasComments = /\/\/|\/\*|\*|#/.test(code);
+  const hasImports = /import\s|require\(|from\s|import\s\w+/.test(code);
+  const hasStructure = /class\s+\w+|const\s+\w+\s*=|let\s+\w+\s*=|function\s+\w+/.test(code);
+  const hasDescription = desc.trim().length > 10;
+  const hasLink = link.trim().length > 5;
+
+  let codeQuality = 40;
+  let architecture = 40;
+  let completion = 40;
+
+  if (lines > 20) codeQuality += 20;
+  if (hasFunctions) codeQuality += 15;
+  if (hasComments) codeQuality += 10;
+  if (hasImports) architecture += 20;
+  if (hasStructure) architecture += 20;
+  if (hasDescription) completion += 20;
+  if (hasLink) completion += 20;
+  if (hasFunctions) completion += 10;
+
+  codeQuality = Math.min(100, codeQuality);
+  architecture = Math.min(100, architecture);
+  completion = Math.min(100, completion);
+  const overallScore = Math.round((codeQuality + architecture + completion) / 3);
+
+  return {
+    codeQualityScore: codeQuality,
+    architectureScore: architecture,
+    completionScore: completion,
+    overallScore,
+    feedback: `Project evaluated locally. ${hasFunctions ? 'Good: your code contains functions and logic.' : 'Tip: add more functions and logic to demonstrate your skills.'} ${hasDescription ? 'Good: you provided a project description.' : 'Tip: add a description of your implementation.'}`,
+  };
 }
 
 /**
@@ -618,5 +1015,6 @@ module.exports = {
   generateQuizQuestions,
   generateProject,
   evaluateProject,
+  analyzeGithubRepo,
   generateSkillGapAnalysis,
 };

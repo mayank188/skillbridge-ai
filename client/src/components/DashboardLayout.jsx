@@ -51,8 +51,8 @@ export function DashboardLayout({ children, role = 'candidate' }) {
           </div>
         </div>
 
-        <main className="max-w-7xl mx-auto p-6">
-          <h1 className="text-3xl font-bold mb-4">Recruiter Dashboard</h1>
+        <main className="max-w-7xl mx-auto p-4">
+          <h1 className="text-2xl font-bold mb-3">Recruiter Dashboard</h1>
           <div>{children}</div>
         </main>
       </div>
@@ -65,19 +65,19 @@ export function DashboardLayout({ children, role = 'candidate' }) {
       <motion.div
         initial={{ x: -300 }}
         animate={{ x: 0 }}
-        className={`fixed md:relative w-64 bg-slate-800 border-r border-slate-700 flex flex-col z-40 ${
+        className={`fixed md:relative w-56 bg-slate-800 border-r border-slate-700 flex flex-col z-40 ${
           sidebarOpen ? 'translate-x-0' : 'translate-x-[-100%] md:translate-x-0'
         }`}
       >
         {/* Logo */}
-        <div className="p-6 border-b border-slate-700">
-          <Link to="/" className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
+        <div className="p-4 border-b border-slate-700">
+          <Link to="/" className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
             SkillBridge AI
           </Link>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto p-4">
+        <nav className="flex-1 overflow-y-auto p-3">
           {items.map((item) => {
             const toPath = item.hash ? `${item.path}#${item.hash}` : item.path;
             const isActive = location.pathname === item.path && (item.hash ? location.hash === `#${item.hash}` : true);
@@ -86,27 +86,27 @@ export function DashboardLayout({ children, role = 'candidate' }) {
                 key={toPath}
                 to={toPath}
                 onClick={() => setSidebarOpen(false)}
-                className={`flex items-center gap-3 px-4 py-3 rounded-lg mb-2 transition ${
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-1 transition ${
                   isActive ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-700'
                 }`}
               >
-                <item.icon className="w-5 h-5" />
-                <span>{item.label}</span>
+                <item.icon className="w-4 h-4" />
+                <span className="text-sm">{item.label}</span>
               </Link>
             );
           })}
         </nav>
 
         {/* User Profile */}
-        <div className="border-t border-slate-700 p-4">
-          <div className="mb-4">
-            <p className="text-sm text-slate-400">Logged in as</p>
-            <p className="font-semibold truncate">{user?.name}</p>
+        <div className="border-t border-slate-700 p-3">
+          <div className="mb-3">
+            <p className="text-xs text-slate-400">Logged in as</p>
+            <p className="text-sm font-semibold truncate">{user?.name}</p>
             <p className="text-xs text-slate-400 capitalize">{user?.role}</p>
           </div>
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600/20 text-red-400 hover:bg-red-600/30 transition"
+            className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-600/20 text-red-400 hover:bg-red-600/30 transition text-sm"
           >
             <LogOut className="w-4 h-4" />
             Logout

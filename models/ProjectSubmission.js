@@ -31,13 +31,23 @@ const projectSubmissionSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
-    evaluation: {
+evaluation: {
       codeQualityScore: {
         type: Number,
         min: 0,
         max: 100,
       },
       architectureScore: {
+        type: Number,
+        min: 0,
+        max: 100,
+      },
+      documentationScore: {
+        type: Number,
+        min: 0,
+        max: 100,
+      },
+      bestPracticesScore: {
         type: Number,
         min: 0,
         max: 100,
@@ -53,6 +63,18 @@ const projectSubmissionSchema = new mongoose.Schema(
         max: 100,
       },
       feedback: String,
+      strengths: [String],
+      improvements: [String],
+      structureSummary: {
+        fileCount: Number,
+        languages: [{ name: String, count: Number }],
+        directories: [String],
+      },
+      source: {
+        type: String,
+        enum: ['ai', 'fallback', 'pending'],
+        default: 'pending',
+      },
       evaluatedAt: Date,
     },
     status: {

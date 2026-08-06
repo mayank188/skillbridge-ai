@@ -8,15 +8,46 @@ import { DashboardLayout } from '../components/DashboardLayout';
 const ACCEPT = '.pdf,application/pdf';
 const MAX_SIZE_MB = 5;
 
-// Simple local skill extractor fallback
+// Broad skill dictionary for local fallback (single + multi-word, case-insensitive).
+const CLIENT_SKILLS = [
+  'javascript','typescript','react','react native','vue','vuejs','angular','svelte',
+  'nextjs','next.js','nuxt','html','html5','css','css3','scss','sass','less','tailwind',
+  'tailwind css','tailwindcss','bootstrap','material ui','redux','redux toolkit','webpack',
+  'vite','babel','jquery','graphql','apollo','d3.js','three.js','chart.js','node','node.js',
+  'nodejs','express','express.js','nest','nestjs','python','django','flask','fastapi','java',
+  'spring','spring boot','c','c++','cpp','c#','csharp','.net','asp.net','php','laravel','ruby',
+  'rails','ruby on rails','go','golang','rust','kotlin','scala','swift','rest','rest api',
+  'restful','grpc','microservices','sql','mysql','postgresql','postgres','mongodb','mongo',
+  'redis','sqlite','mariadb','dynamodb','elasticsearch','firebase','prisma','sequelize',
+  'typeorm','mongoose','aws','amazon web services','azure','gcp','google cloud','docker',
+  'kubernetes','terraform','ansible','jenkins','github actions','ci/cd','linux','ubuntu',
+  'bash','shell','nginx','apache','prometheus','grafana','cloud computing','git','github',
+  'gitlab','bitbucket','jira','postman','swagger','vscode','visual studio code','intellij',
+  'tensorflow','pytorch','keras','scikit-learn','pandas','numpy','machine learning',
+  'data science','deep learning','nlp','natural language processing','computer vision','excel',
+  'agile','scrum','unit testing','jest','mocha','cypress','selenium'
+];
+
+// Simple local skill extractor fallback (case-insensitive, supports multi-word skills).
 function extractSkillsFromText(text) {
   if (!text || typeof text !== 'string') return [];
-  const tokens = text.replace(/[^\w\s]/g, ' ').split(/\s+/).map((t) => t.trim()).filter(Boolean);
-  const common = [
-    'JavaScript','React','Node','Python','Java','C++','C#','PHP','Ruby','Go','Rust','TypeScript','HTML','CSS','SQL','MongoDB','PostgreSQL','MySQL','AWS','Azure','GCP','Docker','Kubernetes','Git','GraphQL','TensorFlow','PyTorch'
-  ];
-  const found = Array.from(new Set(tokens.map(t=>t.toLowerCase()).filter(t=>common.includes(t)))).slice(0,10);
-  return found.map(s => ({ name: s }));
+  const lower = ` ${text.toLowerCase()} `;
+  const found = [];
+  const seen = new Set();
+  // Sort by length descending so multi-word matches are checked first.
+  const sorted = [...CLIENT_SKILLS].sort((a, b) => b.length - a.length);
+  for (const skill of sorted) {
+    const escaped = skill.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(^|[^a-z0-9+#.])${escaped}([^a-z0-9+#.##]|$)`, 'i');
+    if (re.test(lower)) {
+      const key = skill.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      found.push({ name: skill });
+      if (found.length >= 24) break;
+    }
+  }
+  return found;
 }
 
 export default function ResumeAndTest() {
@@ -61,7 +92,7 @@ export default function ResumeAndTest() {
     try {
       const formData = new FormData();
       formData.append('resume', file);
-      const { data } = await api.post('/resume/upload', formData, { headers: { 'Content-Type': undefined } });
+      const { data } = await api.post('/resume/upload', formData);
       setResumeResult(data);
 
       // Prefer server-provided skills, otherwise local extraction

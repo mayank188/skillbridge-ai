@@ -1,13 +1,22 @@
 const User = require('../models/User');
 const ProjectSubmission = require('../models/ProjectSubmission');
 const aiService = require('../services/aiService');
+const { analyzeGithubRepo } = require('../services/githubService');
 
 /**
  * Generate a project assignment based on candidate skills
  */
+const DEFAULT_SKILLS = ['javascript', 'react', 'nodejs', 'html', 'css', 'python', 'sql', 'git'];
+
 async function generateProjectAssignment(req, res, next) {
   try {
-    const { difficulty = 'intermediate' } = req.body;
+    const { difficulty = 'intermediate', skills: requestSkills } = req.body;
+    console.log('generateProjectAssignment request:', {
+      userId: req.user?._id,
+      difficulty,
+      requestSkillsLength: Array.isArray(requestSkills) ? requestSkills.length : null,
+      requestSkillsSample: Array.isArray(requestSkills) ? requestSkills.slice(0, 3) : requestSkills,
+    });
 
     const candidate = await User.findById(req.user._id);
     if (!candidate) {
@@ -16,16 +25,28 @@ async function generateProjectAssignment(req, res, next) {
       return next(err);
     }
 
-    if (!candidate.skills || candidate.skills.length === 0) {
-      const err = new Error('Please upload resume and extract skills first.');
-      err.statusCode = 400;
-      return next(err);
+    // Determine skills: prefer request body, then candidate.skills, then defaults.
+    let skills = [];
+    if (Array.isArray(requestSkills) && requestSkills.length > 0) {
+      skills = requestSkills.map((s) => (typeof s === 'string' ? { name: s } : s));
+    } else if (Array.isArray(candidate.skills) && candidate.skills.length > 0) {
+      skills = candidate.skills;
+    } else {
+      skills = DEFAULT_SKILLS.map((name) => ({ name }));
     }
 
-    // Get skills for project generation
-    const skills = candidate.skills.slice(0, 5);
+    console.log(`Generate project for user=${req.user._id}, skills=${skills.length}, difficulty=${difficulty}`);
+
+    // Limit to a reasonable number for generation.
+    skills = skills.slice(0, 5);
 
     const project = await aiService.generateProject(skills, difficulty);
+
+    if (!project || !project.title) {
+      const err = new Error('Failed to generate a project. Please try again.');
+      err.statusCode = 500;
+      return next(err);
+    }
 
     // Create project submission record
     const projectSubmission = await ProjectSubmission.create({
@@ -55,11 +76,11 @@ async function generateProjectAssignment(req, res, next) {
 }
 
 /**
- * Submit project for evaluation
+ * Submit project for evaluation — automatically analyzes the GitHub repo.
  */
 async function submitProject(req, res, next) {
   try {
-    const { projectId, githubLink } = req.body;
+    const { projectId, githubLink, description } = req.body;
 
     if (!projectId || !githubLink) {
       const err = new Error('Project ID and GitHub link are required.');
@@ -84,17 +105,71 @@ async function submitProject(req, res, next) {
       return next(err);
     }
 
-    // Update submission with GitHub link
+    // Update submission with GitHub link and optional description
     project.githubLink = githubLink;
+    if (description) project.projectDescription = description;
     project.submittedAt = new Date();
     project.status = 'submitted';
     await project.save();
 
-    res.json({
-      projectId: project._id,
-      message: 'Project submitted successfully. Evaluation in progress...',
-      status: 'submitted',
-    });
+    // Automatically analyze the GitHub repository (structure + code quality).
+    const repoAnalysis = await analyzeGithubRepo(githubLink);
+
+    if (repoAnalysis.ok) {
+      const evaluation = await aiService.analyzeGithubRepo(repoAnalysis, project.projectDescription);
+
+      const overallScore = Math.round(
+        (evaluation.codeQualityScore +
+          evaluation.architectureScore +
+          evaluation.documentationScore +
+          evaluation.bestPracticesScore) / 4
+      );
+
+      project.evaluation = {
+        codeQualityScore: evaluation.codeQualityScore,
+        architectureScore: evaluation.architectureScore,
+        documentationScore: evaluation.documentationScore,
+        bestPracticesScore: evaluation.bestPracticesScore,
+        completionScore: evaluation.completionScore ?? overallScore,
+        overallScore,
+        feedback: evaluation.feedback,
+        strengths: evaluation.strengths,
+        improvements: evaluation.improvements,
+        structureSummary: evaluation.structureSummary,
+        source: evaluation.source || 'ai',
+        evaluatedAt: new Date(),
+      };
+      project.status = 'evaluated';
+      await project.save();
+
+      // Update user project score if higher
+      const candidate = await User.findById(req.user._id);
+      if (overallScore > (candidate.projectScore || 0)) {
+        await User.findByIdAndUpdate(req.user._id, { projectScore: overallScore });
+      }
+
+      res.json({
+        projectId: project._id,
+        evaluation: project.evaluation,
+        status: 'evaluated',
+        message: 'Project submitted and analyzed successfully.',
+      });
+    } else {
+      // Repo could not be fetched (e.g., private/missing). Submission is saved but pending analysis.
+      project.evaluation = {
+        source: 'pending',
+        feedback: repoAnalysis.error || 'Repository could not be analyzed automatically.',
+        evaluatedAt: new Date(),
+      };
+      await project.save();
+
+      res.status(201).json({
+        projectId: project._id,
+        status: 'submitted',
+        message: 'Project submitted, but the repository could not be analyzed automatically. Please make your repo public or check the URL.',
+        evaluation: project.evaluation,
+      });
+    }
   } catch (err) {
     next(err);
   }
@@ -106,6 +181,7 @@ async function submitProject(req, res, next) {
 async function evaluateProject(req, res, next) {
   try {
     const { projectId } = req.params;
+    const { code } = req.body;
 
     const project = await ProjectSubmission.findOne({
       _id: projectId,
@@ -124,13 +200,13 @@ async function evaluateProject(req, res, next) {
       return next(err);
     }
 
-    // Simulate getting code from GitHub (in production, would fetch real code)
-    const mockCode = `// Sample code from ${project.githubLink}\n// This is a placeholder for actual code evaluation`;
+    // Use the actual code submitted by the candidate for analysis.
+    const submittedCode = String(code || '').trim().slice(0, 5000);
 
     const evaluation = await aiService.evaluateProject(
       project.projectDescription,
       project.githubLink,
-      mockCode
+      submittedCode
     );
 
     // Calculate overall score

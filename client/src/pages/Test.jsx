@@ -26,8 +26,14 @@ export default function Test() {
   const audioRef = useRef(null);
   const canvasRef = useRef(null);
   const proctorIntervalRef = useRef(null);
-  const [cameraAllowed, setCameraAllowed] = useState(null); // null=pending, false=denied, true=granted
+const [cameraAllowed, setCameraAllowed] = useState(null); // null=pending, false=denied, true=granted
   const [micAllowed, setMicAllowed] = useState(null); // null=pending, false=denied, true=granted
+  const [permissionReady, setPermissionReady] = useState(false); // gate: test only starts after camera+mic granted
+  const [proctorStarted, setProctorStarted] = useState(false);
+  const [proctorStarting, setProctorStarting] = useState(false);
+  const [violations, setViolations] = useState(0);
+  const [violationWarning, setViolationWarning] = useState('');
+  const violationsRef = useRef(0);
   const sessionIdRef = useRef(`sess_${Date.now()}_${Math.random().toString(36).slice(2,8)}`);
 
   useEffect(() => {
@@ -96,16 +102,93 @@ export default function Test() {
     }
   }
 
-  useEffect(() => {
-    if (questions.length === 0 || submitted) return undefined;
-    let mounted = true;
-    // start proctoring on mount
-    startProctoring().catch(() => {
-      if (mounted) setCameraAllowed(false);
-    });
+// Start the test: request camera/mic, enable fullscreen, then unlock the test.
+  async function startTest() {
+    if (proctorStarting) return;
+    setProctorStarting(true);
+    setCameraAllowed(null);
+    setMicAllowed(null);
+    try {
+      await startProctoring();
+      await requestFullscreen();
+      setPermissionReady(true);
+      setProctorStarted(true);
+    } catch (err) {
+      console.warn('[Test] Failed to start test', err);
+      setPermissionReady(false);
+      setProctorStarted(false);
+    } finally {
+      setProctorStarting(false);
+    }
+  }
 
+  function requestFullscreen() {
+    const el = document.documentElement;
+    if (el.requestFullscreen) return el.requestFullscreen();
+    if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
+    if (el.msRequestFullscreen) return el.msRequestFullscreen();
+    return Promise.resolve();
+  }
+
+  function exitFullscreen() {
+    if (document.exitFullscreen) document.exitFullscreen();
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+
+  // Fullscreen lock: if user exits fullscreen during the test, log a violation and re-enter.
+  useEffect(() => {
+    if (!permissionReady || submitted || questions.length === 0) return undefined;
+    function onFullscreenChange() {
+      const inFullscreen = !!document.fullscreenElement;
+      if (!inFullscreen) {
+        registerViolation('You left fullscreen mode. The test will be re-locked.');
+        requestFullscreen();
+      }
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
     return () => {
-      mounted = false;
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+    };
+  }, [permissionReady, submitted, questions.length]);
+
+  // Tab-switch detection: when the tab loses focus, log a violation and auto-submit after a limit.
+  useEffect(() => {
+    if (!permissionReady || submitted || questions.length === 0) return undefined;
+    function onVisibility() {
+      if (document.hidden) {
+        registerViolation('You switched tabs or left the test window.');
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', onBlur);
+    function onBlur() {
+      if (!document.hidden) registerViolation('The test window lost focus.');
+    }
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [permissionReady, submitted, questions.length]);
+
+  // Register a proctoring violation. Auto-submits after 3 violations.
+  function registerViolation(message) {
+    if (submitted) return;
+    const count = violationsRef.current + 1;
+    violationsRef.current = count;
+    setViolations(count);
+    setViolationWarning(`${message} (${count}/3)`);
+    if (count >= 3) {
+      alert('Your test has been auto-submitted due to multiple proctoring violations.');
+      handleSubmit();
+    }
+  }
+
+// Cleanup media tracks and proctor interval once the test is submitted or unmounted.
+  useEffect(() => {
+    if (!permissionReady || questions.length === 0) return undefined;
+    return () => {
       if (proctorIntervalRef.current) clearInterval(proctorIntervalRef.current);
       if (videoRef.current && videoRef.current.srcObject) {
         const tracks = videoRef.current.srcObject.getTracks();
@@ -118,7 +201,7 @@ export default function Test() {
         audioRef.current.srcObject = null;
       }
     };
-  }, [questions.length, submitted]);
+  }, [permissionReady, questions.length]);
 
   function setAnswer(index, value) {
     setAnswers((prev) => {
@@ -126,6 +209,26 @@ export default function Test() {
       next[index] = value;
       return next;
     });
+  }
+
+// Stop the camera/mic stream and proctor interval (turn them off after submission).
+  function stopProctoring() {
+    if (proctorIntervalRef.current) {
+      clearInterval(proctorIntervalRef.current);
+      proctorIntervalRef.current = null;
+    }
+    if (videoRef.current && videoRef.current.srcObject) {
+      const tracks = videoRef.current.srcObject.getTracks();
+      tracks.forEach((t) => t.stop());
+      videoRef.current.srcObject = null;
+    }
+    if (audioRef.current && audioRef.current.srcObject) {
+      const tracks = audioRef.current.srcObject.getTracks();
+      tracks.forEach((t) => t.stop());
+      audioRef.current.srcObject = null;
+    }
+    setCameraAllowed(false);
+    setMicAllowed(false);
   }
 
   function handleSubmit() {
@@ -138,6 +241,9 @@ export default function Test() {
         console.warn('[Test.jsx] No questions to submit');
         return;
       }
+
+      // Turn off camera/mic immediately once the test is submitted.
+      stopProctoring();
 
       // ensure answers array length matches questions (fill unanswered with null)
       const safeAnswers = questions.map((_, i) => (i < answers.length ? answers[i] : null));
@@ -190,37 +296,66 @@ export default function Test() {
     );
   }
 
-  // If camera access was explicitly denied, block the test and ask user to retry
-  if (cameraAllowed === false || micAllowed === false) {
+// Permission gate: show this screen until the user grants camera/mic and clicks Start Test.
+  if (!permissionReady) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center max-w-md">
-          <h1 className="text-xl font-semibold text-gray-800 mb-2">Camera & Microphone Required</h1>
-          <p className="text-gray-600 mb-4">This test requires camera and microphone access for proctoring. Please allow both to continue.</p>
-          <div className="flex gap-3 justify-center">
-            <button
-              id="retry-camera-btn"
-              type="button"
-              onClick={async () => {
-                try {
-                  await startProctoring();
-                  setCameraAllowed(true);
-                  setMicAllowed(true);
-                } catch (e) {
-                  console.warn('Retry camera/mic failed', e);
-                  setCameraAllowed(false);
-                  setMicAllowed(false);
-                }
-              }}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg"
-            >
-              Retry
-            </button>
-            <Link to="/candidate" className="px-4 py-2 border rounded-lg text-gray-700">
-              Exit test
-            </Link>
+        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center max-w-md w-full">
+          <h1 className="text-xl font-semibold text-gray-800 mb-2">Test Setup Required</h1>
+          <p className="text-gray-600 mb-6">
+            This test is fully proctored. You must allow camera and microphone access and keep the test in fullscreen.
+            Do not switch tabs or leave fullscreen during the test.
+          </p>
+
+          <div className="flex items-center justify-center gap-6 mb-6">
+            <div className="flex flex-col items-center">
+              <span className={`text-3xl mb-1 ${cameraAllowed ? 'opacity-100' : 'opacity-40'}`}>📹</span>
+              <span className={`text-sm font-medium ${cameraAllowed ? 'text-green-600' : 'text-gray-500'}`}>
+                {cameraAllowed ? 'Camera On' : 'Camera'}
+              </span>
+            </div>
+            <div className="flex flex-col items-center">
+              <span className={`text-3xl mb-1 ${micAllowed ? 'opacity-100' : 'opacity-40'}`}>🎤</span>
+              <span className={`text-sm font-medium ${micAllowed ? 'text-green-600' : 'text-gray-500'}`}>
+                {micAllowed ? 'Microphone On' : 'Microphone'}
+              </span>
+            </div>
+            <div className="flex flex-col items-center">
+              <span className={`text-3xl mb-1 ${proctorStarted ? 'opacity-100' : 'opacity-40'}`}>🖥️</span>
+              <span className={`text-sm font-medium ${proctorStarted ? 'text-green-600' : 'text-gray-500'}`}>
+                {proctorStarted ? 'Fullscreen' : 'Fullscreen'}
+              </span>
+            </div>
           </div>
+
+          {cameraAllowed === false || micAllowed === false ? (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm text-red-700">
+              Camera or microphone access was denied. Please allow both in your browser and try again.
+            </div>
+          ) : (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4 text-sm text-gray-600">
+              Click "Start Test" to allow camera & microphone and enter fullscreen. The test will not begin until you do.
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={startTest}
+            disabled={proctorStarting}
+            className="w-full px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {proctorStarting ? 'Requesting permissions...' : 'Start Test'}
+          </button>
+
+          <Link to="/candidate" className="block mt-4 text-sm text-blue-600 hover:underline">
+            Cancel and exit
+          </Link>
         </div>
+
+        {/* hidden video, audio & canvas used for snapshots during proctoring */}
+        <video id="proctor-video" ref={videoRef} style={{ display: 'none' }} playsInline muted />
+        <audio id="proctor-audio" ref={audioRef} style={{ display: 'none' }} />
+        <canvas ref={canvasRef} style={{ display: 'none' }} />
       </div>
     );
   }
@@ -399,8 +534,15 @@ export default function Test() {
               >
                 Submit test
               </button>
-            </div>
+</div>
         </div>
+
+        {violationWarning && (
+          <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg text-sm text-red-700 flex items-center gap-2">
+            <span>⚠️</span>
+            <span>{violationWarning}</span>
+          </div>
+        )}
 
         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
